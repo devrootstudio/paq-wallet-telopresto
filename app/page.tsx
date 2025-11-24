@@ -7,6 +7,7 @@ import Step2Phone from "@/components/steps/step-2-phone"
 import Step3Request from "@/components/steps/step-3-request"
 import Step4Approval from "@/components/steps/step-4-approval"
 import Step5Success from "@/components/steps/step-5-success"
+import Step6Error from "@/components/steps/step-6-error"
 
 export default function Home() {
   const { step, isLoading } = useWizardStore()
@@ -23,6 +24,8 @@ export default function Home() {
         return <Step4Approval />
       case 5:
         return <Step5Success />
+      case 6:
+        return <Step6Error />
       default:
         return <Step1Form />
     }

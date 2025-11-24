@@ -1,6 +1,6 @@
 import { create } from "zustand"
 
-type Step = 1 | 2 | 3 | 4 | 5
+type Step = 1 | 2 | 3 | 4 | 5 | 6
 
 interface FormData {
   identification: string
@@ -19,7 +19,11 @@ interface WizardState {
   step: Step
   isLoading: boolean
   formData: FormData
+  errorMessage: string | null
   setStep: (step: Step) => void
+  setLoading: (loading: boolean) => void
+  setErrorMessage: (message: string | null) => void
+  setErrorStep: () => void
   nextStep: () => void
   nextStepAsync: () => Promise<void>
   goToStepAsync: (step: Step) => Promise<void> // added goToStepAsync
@@ -31,6 +35,7 @@ interface WizardState {
 export const useWizardStore = create<WizardState>((set) => ({
   step: 1,
   isLoading: false,
+  errorMessage: null,
   formData: {
     identification: "",
     fullName: "",
@@ -44,12 +49,15 @@ export const useWizardStore = create<WizardState>((set) => ({
     requestedAmount: 1500, // updated default requested amount to 1500
   },
   setStep: (step) => set({ step }),
-  nextStep: () => set((state) => ({ step: Math.min(state.step + 1, 5) as Step })),
+  setLoading: (loading) => set({ isLoading: loading }),
+  setErrorMessage: (message) => set({ errorMessage: message }),
+  setErrorStep: () => set({ step: 6 }),
+  nextStep: () => set((state) => ({ step: Math.min(state.step + 1, 6) as Step })),
   nextStepAsync: async () => {
     set({ isLoading: true })
     await new Promise((resolve) => setTimeout(resolve, 3000))
     set((state) => ({
-      step: Math.min(state.step + 1, 5) as Step,
+      step: Math.min(state.step + 1, 6) as Step,
       isLoading: false,
     }))
   },
@@ -64,6 +72,7 @@ export const useWizardStore = create<WizardState>((set) => ({
     set({
       step: 1,
       isLoading: false,
+      errorMessage: null,
       formData: {
         identification: "",
         fullName: "",

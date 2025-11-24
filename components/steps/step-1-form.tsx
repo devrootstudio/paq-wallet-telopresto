@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { ChevronDown } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
+import { submitStep1Form } from "@/app/actions"
 
 // Helper component for tooltips
 export const ErrorTooltip = ({ message }: { message: string }) => {
@@ -20,7 +21,7 @@ export const ErrorTooltip = ({ message }: { message: string }) => {
 }
 
 export default function Step1Form() {
-  const { nextStepAsync, formData, updateFormData } = useWizardStore()
+  const { nextStepAsync, formData, updateFormData, isLoading, setLoading, setErrorStep, setErrorMessage } = useWizardStore()
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [touched, setTouched] = useState<Record<string, boolean>>({})
 
@@ -146,8 +147,48 @@ export default function Step1Form() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (validateAll()) {
-      await nextStepAsync()
+
+    // Validar campos del cliente primero
+    if (!validateAll()) {
+      return
+    }
+
+    // Activar el loader global
+    setLoading(true)
+
+    try {
+      // Preparar datos para enviar al servidor
+      const formDataToSubmit = {
+        identification: formData.identification.replace(/\s/g, ""),
+        fullName: formData.fullName.trim(),
+        phone: formData.phone.replace(/\s/g, ""),
+        email: formData.email.trim(),
+        nit: formData.nit.trim(),
+        startDate: formData.startDate,
+        salary: formData.salary,
+        paymentFrequency: formData.paymentFrequency,
+      }
+
+      // Llamar a la server action
+      const result = await submitStep1Form(formDataToSubmit)
+
+      if (result.success) {
+        // Si es exitoso, avanzar al siguiente step
+        // nextStepAsync manejará el isLoading (lo mantendrá en true durante la transición)
+        await nextStepAsync()
+      } else {
+        // Si hay error, guardar el mensaje y ir al step de error (fallback)
+        const errorMsg = result.error || "Error al procesar el formulario"
+        setErrorMessage(errorMsg)
+        setLoading(false)
+        setErrorStep()
+      }
+    } catch (error) {
+      console.error("Error submitting form:", error)
+      const errorMsg = error instanceof Error ? error.message : "Error desconocido al enviar el formulario"
+      setErrorMessage(errorMsg)
+      setLoading(false)
+      setErrorStep()
     }
   }
 
@@ -419,8 +460,8 @@ export default function Step1Form() {
         </div>
 
         <div className="flex justify-end mt-6">
-          <Button type="submit" variant="paqPrimary" className="w-32">
-            ENVIAR
+          <Button type="submit" variant="paqPrimary" className="w-32" disabled={isLoading}>
+            {isLoading ? "ENVIANDO..." : "ENVIAR"}
           </Button>
         </div>
       </form>
