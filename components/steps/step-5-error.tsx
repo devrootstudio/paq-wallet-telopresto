@@ -19,10 +19,10 @@ export default function Step5Error() {
 
   return (
     <div className="w-full max-w-md mx-auto px-4 py-8 flex flex-col justify-center items-center min-h-[60vh] animate-in zoom-in-95 duration-500">
-      <div className="bg-red-500/10 border border-red-500 rounded-3xl p-10 w-full aspect-square flex flex-col justify-center items-center text-center shadow-xl">
+      <div className="bg-yellow-500/10 border border-yellow-500 rounded-3xl p-10 w-full aspect-square flex flex-col justify-center items-center text-center shadow-xl">
         <div className="mb-6">
           <svg
-            className="w-20 h-20 mx-auto text-red-500"
+            className="w-20 h-20 mx-auto text-yellow-500"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -36,11 +36,11 @@ export default function Step5Error() {
             />
           </svg>
         </div>
-        <h2 className="text-2xl md:text-3xl font-bold text-red-500 mb-4 leading-snug">
-          Ocurrió un error
+        <h2 className="text-2xl md:text-3xl font-bold text-yellow-500 mb-4 leading-snug">
+          No fue posible procesar tu solicitud
         </h2>
         <p className="text-white text-lg mb-8 px-4">
-          {errorMessage || "No se pudo procesar tu solicitud. Por favor, intenta de nuevo."}
+          {errorMessage || "No fue posible procesar tu solicitud. Por favor, intenta nuevamente."}
         </p>
         <Button onClick={handleTryAgain} variant="paqPrimary" className="w-48">
           Intentar de nuevo
