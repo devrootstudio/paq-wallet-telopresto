@@ -3,7 +3,7 @@
 import { useWizardStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
 
-export default function Step6Error() {
+export default function Step5Error() {
   const { errorMessage, errorFromStep, setStep, setLoading, setErrorMessage, reset } = useWizardStore()
 
   const handleTryAgain = () => {

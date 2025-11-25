@@ -1,6 +1,6 @@
 import { create } from "zustand"
 
-type Step = 1 | 2 | 3 | 4 | 5 | 6
+type Step = 1 | 2 | 3 | 4 | 5
 
 interface FormData {
   identification: string
@@ -53,13 +53,13 @@ export const useWizardStore = create<WizardState>((set) => ({
   setStep: (step) => set({ step }),
   setLoading: (loading) => set({ isLoading: loading }),
   setErrorMessage: (message) => set({ errorMessage: message }),
-  setErrorStep: () => set((state) => ({ step: 6, errorFromStep: state.step })),
-  nextStep: () => set((state) => ({ step: Math.min(state.step + 1, 6) as Step })),
+  setErrorStep: () => set((state) => ({ step: 5, errorFromStep: state.step })),
+  nextStep: () => set((state) => ({ step: Math.min(state.step + 1, 5) as Step })),
   nextStepAsync: async () => {
     set({ isLoading: true })
     await new Promise((resolve) => setTimeout(resolve, 3000))
     set((state) => ({
-      step: Math.min(state.step + 1, 6) as Step,
+      step: Math.min(state.step + 1, 5) as Step,
       isLoading: false,
     }))
   },

@@ -2,7 +2,7 @@
 
 import { useWizardStore } from "@/lib/store" // Import store
 
-export default function Step5Success() {
+export default function Step4Success() {
   const { formData } = useWizardStore() // Get formData
 
   return (

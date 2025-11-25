@@ -6,7 +6,7 @@ import { useState } from "react"
 import { Input } from "@/components/ui/input"
 import { ErrorTooltip } from "./step-1-form" // importing ErrorTooltip
 
-export default function Step4Approval() {
+export default function Step3Approval() {
   const { nextStepAsync, formData, updateFormData } = useWizardStore()
   const [isEditing, setIsEditing] = useState(false)
   const [editAmount, setEditAmount] = useState("")

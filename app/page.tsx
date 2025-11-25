@@ -4,10 +4,9 @@ import { useWizardStore } from "@/lib/store"
 import { Spinner } from "@/components/ui/spinner"
 import Step1Form from "@/components/steps/step-1-form"
 import Step2Phone from "@/components/steps/step-2-phone"
-import Step3Request from "@/components/steps/step-3-request"
-import Step4Approval from "@/components/steps/step-4-approval"
-import Step5Success from "@/components/steps/step-5-success"
-import Step6Error from "@/components/steps/step-6-error"
+import Step3Approval from "@/components/steps/step-3-approval"
+import Step4Success from "@/components/steps/step-4-success"
+import Step5Error from "@/components/steps/step-5-error"
 
 export default function Home() {
   const { step, isLoading } = useWizardStore()
@@ -19,13 +18,11 @@ export default function Home() {
       case 2:
         return <Step2Phone />
       case 3:
-        return <Step3Request />
+        return <Step3Approval />
       case 4:
-        return <Step4Approval />
+        return <Step4Success />
       case 5:
-        return <Step5Success />
-      case 6:
-        return <Step6Error />
+        return <Step5Error />
       default:
         return <Step1Form />
     }
