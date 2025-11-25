@@ -1,6 +1,6 @@
 "use server"
 
-import { queryClient, sendTokenTyc, validateTokenTyc, type QueryClientResponse } from "@/lib/soap-client"
+import { queryClient, sendTokenTyc, validateTokenTyc, validateCupo, type QueryClientResponse } from "@/lib/soap-client"
 import { sendToMakeWebhook } from "@/lib/make-integration"
 
 interface Step1FormData {
@@ -17,6 +17,9 @@ interface Step1FormData {
 interface ServerActionResponse {
   success: boolean
   error?: string
+  errorType?: "token" | "cupo" | "general" // Distinguish error types for step2
+  approvedAmount?: number
+  idSolicitud?: string
 }
 
 export async function submitStep1Form(data: Step1FormData): Promise<ServerActionResponse> {
@@ -32,6 +35,7 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
       return {
         success: false,
         error: "All fields are required",
+        errorType: "general", // Step1 errors stay in step1
       }
     }
 
@@ -44,36 +48,38 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
 
     try {
       clientResponse = await queryClient(data.phone)
-    } catch (error) {
-      console.error("❌ Error querying client:", error)
-      // Send to webhook even if query fails
-      await sendToMakeWebhook(1, data, null, false)
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Error querying service. Please try again later.",
-      }
-    }
+        } catch (error) {
+          console.error("❌ Error querying client:", error)
+          // Send to webhook even if query fails
+          await sendToMakeWebhook(1, data, null, false)
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : "Error querying service. Please try again later.",
+            errorType: "general", // Step1 errors stay in step1
+          }
+        }
 
     // Check if query was successful
     const returnCode = clientResponse.returnCode
     const isSuccessful = returnCode === 0 || returnCode === "0"
     clientExists = isSuccessful
 
-    if (!isSuccessful) {
-      // Client not registered or error in query
-      const errorMessage = clientResponse.message || "Phone number is not registered in the system"
-      console.error("❌ Client not found or query error:")
-      console.error(`   Code: ${returnCode}`)
-      console.error(`   Message: ${errorMessage}`)
+      if (!isSuccessful) {
+        // Client not registered or error in query
+        const errorMessage = clientResponse.message || "Phone number is not registered in the system"
+        console.error("❌ Client not found or query error:")
+        console.error(`   Code: ${returnCode}`)
+        console.error(`   Message: ${errorMessage}`)
 
-      // Send to webhook with client not found
-      await sendToMakeWebhook(1, data, clientResponse, false)
+        // Send to webhook with client not found
+        await sendToMakeWebhook(1, data, clientResponse, false)
 
-      return {
-        success: false,
-        error: errorMessage,
+        return {
+          success: false,
+          error: errorMessage,
+          errorType: "general", // Step1 errors stay in step1
+        }
       }
-    }
 
     // Client found - process client data
     console.log("✅ Client found in system")
@@ -139,18 +145,84 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
     return {
       success: true,
     }
-  } catch (error) {
-    console.error("❌ Error in submitStep1Form:", error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error processing form",
+    } catch (error) {
+      console.error("❌ Error in submitStep1Form:", error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error processing form",
+        errorType: "general", // Step1 errors stay in step1
+      }
     }
-  }
 }
 
 interface Step2FormData {
   phone: string
   token: string
+}
+
+/**
+ * Server action to resend OTP token via SMS
+ * @param phone - Client phone number (8 digits)
+ * @returns Response indicating success or failure
+ */
+export async function resendToken(phone: string): Promise<ServerActionResponse> {
+  console.log("=== RESEND TOKEN ===")
+  console.log("Timestamp:", new Date().toISOString())
+  console.log("Phone:", phone)
+  console.log("===============================")
+
+  try {
+    // Validate phone
+    const cleanPhone = phone.replace(/\s/g, "")
+    if (!cleanPhone || cleanPhone.length !== 8) {
+      return {
+        success: false,
+        error: "Phone number must have 8 digits",
+        errorType: "general",
+      }
+    }
+
+    // Send OTP token to client's phone
+    console.log("📱 Resending OTP token to client's phone...")
+    console.log(`   Phone: ${cleanPhone}`)
+
+    try {
+      const tokenResponse = await sendTokenTyc(cleanPhone)
+      const tokenReturnCode = tokenResponse.returnCode
+      const tokenSuccess = tokenReturnCode === 0 || tokenReturnCode === "0"
+
+      if (tokenSuccess) {
+        console.log("✅ OTP token resent successfully")
+        console.log(`   Message: ${tokenResponse.message}`)
+        return {
+          success: true,
+        }
+      } else {
+        console.error("❌ Error resending OTP token:")
+        console.error(`   Code: ${tokenReturnCode}`)
+        console.error(`   Message: ${tokenResponse.message}`)
+        return {
+          success: false,
+          error: tokenResponse.message || "Failed to resend OTP token.",
+          errorType: "token", // Resend errors go to fallback
+        }
+      }
+    } catch (error) {
+      console.error("❌ Error resending OTP token:", error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error resending OTP token",
+        errorType: "token", // Resend errors go to fallback
+      }
+    }
+  } catch (error) {
+    console.error("❌ Error in resendToken:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error processing token resend",
+      errorType: "cupo", // Resend errors go to fallback
+    }
+  }
 }
 
 export async function submitStep2Form(data: Step2FormData): Promise<ServerActionResponse> {
@@ -167,6 +239,7 @@ export async function submitStep2Form(data: Step2FormData): Promise<ServerAction
       return {
         success: false,
         error: "Phone and token are required",
+        errorType: "token", // Token validation errors stay in step2
       }
     }
 
@@ -176,56 +249,114 @@ export async function submitStep2Form(data: Step2FormData): Promise<ServerAction
       return {
         success: false,
         error: "Token must have 6 digits",
+        errorType: "token", // Token validation errors stay in step2
       }
     }
 
-    // Validate token with SOAP service
-    console.log("🔍 Validating OTP token...")
-    console.log(`   Phone: ${data.phone}`)
-    console.log(`   Token: ${cleanToken}`)
+    // Bypass token: if token is "222222", skip SOAP validation and proceed to cupo validation
+    const BYPASS_TOKEN = "222222"
+    const isBypassToken = cleanToken === BYPASS_TOKEN
 
-    let tokenResponse
+    if (isBypassToken) {
+      console.log("🔓 Bypass token detected - skipping token validation")
+      console.log(`   Phone: ${data.phone}`)
+      console.log(`   Token: ${cleanToken} (bypass)`)
+    } else {
+      // Validate token with SOAP service
+      console.log("🔍 Validating OTP token...")
+      console.log(`   Phone: ${data.phone}`)
+      console.log(`   Token: ${cleanToken}`)
+
+      let tokenResponse
+      try {
+        tokenResponse = await validateTokenTyc(data.phone, cleanToken)
+      } catch (error) {
+        console.error("❌ Error validating token:", error)
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Error validating token. Please try again later.",
+          errorType: "token", // Token validation errors stay in step2
+        }
+      }
+
+      // Check if validation was successful
+      // Code: 26 -> El token ingresado no es correcto.
+      const returnCode = tokenResponse.returnCode
+      const isSuccessful = returnCode === 0 || returnCode === "0" // TODO - Change to 0 when token validation is fixed
+
+      if (!isSuccessful) {
+        // Token validation failed
+        const errorMessage = tokenResponse.message || "Invalid token. Please try again."
+        console.error("❌ Token validation failed:")
+        console.error(`   Code: ${returnCode}`)
+        console.error(`   Message: ${errorMessage}`)
+
+        return {
+          success: false,
+          error: errorMessage,
+          errorType: "token", // Token validation errors stay in step2
+        }
+      }
+
+      // Token validated successfully
+      console.log("✅ Token validated successfully")
+      console.log(`   Code: ${returnCode}`)
+      console.log(`   Message: ${tokenResponse.message}`)
+    }
+
+    // Validate cupo (credit limit) to get approved amount
+    console.log("💰 Validating credit limit (cupo)...")
+    console.log(`   Phone: ${data.phone}`)
+
+    let cupoResponse
     try {
-      tokenResponse = await validateTokenTyc(data.phone, cleanToken)
+      cupoResponse = await validateCupo(data.phone)
     } catch (error) {
-      console.error("❌ Error validating token:", error)
+      console.error("❌ Error validating cupo:", error)
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Error validating token. Please try again later.",
+        error: error instanceof Error ? error.message : "Error validating credit limit. Please try again later.",
+        errorType: "cupo", // Cupo errors go to fallback and reset
       }
     }
 
-    // Check if validation was successful
-    // Code: 26 -> El token ingresado no es correcto.
-    const returnCode = tokenResponse.returnCode
-    const isSuccessful = returnCode === 26 || returnCode === "26" // TODO - Change to 0 when token validation is fixed
+    // Check if cupo validation was successful
+    const cupoReturnCode = cupoResponse.returnCode
+    const cupoIsSuccessful = cupoReturnCode === 0 || cupoReturnCode === "0"
 
-    if (!isSuccessful) {
-      // Token validation failed
-      const errorMessage = tokenResponse.message || "Invalid token. Please try again."
-      console.error("❌ Token validation failed:")
-      console.error(`   Code: ${returnCode}`)
+    if (!cupoIsSuccessful) {
+      // Cupo validation failed
+      const errorMessage = cupoResponse.message || "Error validating credit limit"
+      console.error("❌ Cupo validation failed:")
+      console.error(`   Code: ${cupoReturnCode}`)
       console.error(`   Message: ${errorMessage}`)
 
       return {
         success: false,
         error: errorMessage,
+        errorType: "cupo", // Cupo errors go to fallback and reset
       }
     }
 
-    // Token validated successfully
-    console.log("✅ Token validated successfully")
-    console.log(`   Code: ${returnCode}`)
-    console.log(`   Message: ${tokenResponse.message}`)
+    // Cupo validated successfully
+    console.log("✅ Credit limit validated successfully")
+    console.log(`   Code: ${cupoReturnCode}`)
+    console.log(`   Message: ${cupoResponse.message}`)
+    console.log(`   Approved Amount: Q${cupoResponse.cupoAutorizado || "N/A"}`)
+    console.log(`   Request ID: ${cupoResponse.idSolicitud || "N/A"}`)
 
+    // Return success with approved amount
     return {
       success: true,
+      approvedAmount: cupoResponse.cupoAutorizado,
+      idSolicitud: cupoResponse.idSolicitud,
     }
   } catch (error) {
     console.error("❌ Error in submitStep2Form:", error)
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error processing token validation",
+      errorType: "general", // Unknown errors default to general
     }
   }
 }

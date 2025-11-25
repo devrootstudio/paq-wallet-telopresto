@@ -40,6 +40,20 @@ export interface ValidateTokenResponse {
   message: string
 }
 
+export interface ValidateCupoResponse {
+  returnCode: string | number
+  message: string
+  idSolicitud?: string
+  celular?: string
+  cupoAutorizado?: number
+  comisionSobreCupo?: number
+  porcComision?: number
+  limMaxComBanda1?: number
+  comMinBanda1?: number
+  limMaxComBanda2?: number
+  comMinBanda2?: number
+}
+
 // Raw SOAP response interface (Spanish format from API)
 interface RawSoapResponse {
   codret: string | number
@@ -148,6 +162,20 @@ function buildValidateTokenSoapEnvelope(username: string, password: string, phon
       <CELULAR>${escapeXml(phone)}</CELULAR>
       <TOKEN>${escapeXml(token)}</TOKEN>
     </Valida_Token_TyC>
+  </soap:Body>
+</soap:Envelope>`
+}
+
+// Function to build SOAP XML envelope for Valida_Cupo
+function buildValidateCupoSoapEnvelope(username: string, password: string, phone: string): string {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <valida_cupo xmlns="http://www.paq.com.gt/">
+      <USERNAME>${escapeXml(username)}</USERNAME>
+      <PASSWORD>${escapeXml(password)}</PASSWORD>
+      <CELULAR>${escapeXml(phone)}</CELULAR>
+    </valida_cupo>
   </soap:Body>
 </soap:Envelope>`
 }
@@ -530,6 +558,120 @@ export async function validateTokenTyc(phone: string, token: string): Promise<Va
     return {
       returnCode: resultValue.codret || "0",
       message: resultValue.mensaje || "",
+    }
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      throw new Error(`SOAP service connection error: ${error.message}`)
+    }
+    throw error
+  }
+}
+
+/**
+ * Validates credit limit (cupo) for salary advance authorization
+ * @param phone - Client phone number (8 digits)
+ * @returns Response with authorized amount and commission details
+ */
+export async function validateCupo(phone: string): Promise<ValidateCupoResponse> {
+  // Validate credentials
+  if (!USERNAME || !PASSWORD) {
+    throw new Error("SOAP credentials not configured. Check SOAP_USERNAME and SOAP_PASSWORD_URL_ENCODE environment variables")
+  }
+
+  // Validate phone
+  const cleanPhone = phone.replace(/\s/g, "")
+  if (!cleanPhone || cleanPhone.length !== 8) {
+    throw new Error("Phone number must have 8 digits")
+  }
+
+  try {
+    // Build SOAP XML
+    const soapBody = buildValidateCupoSoapEnvelope(USERNAME, PASSWORD, cleanPhone)
+
+    // Configure headers to ensure UTF-8
+    const headers = {
+      "Content-Type": "text/xml; charset=utf-8",
+      SOAPAction: "http://www.paq.com.gt/valida_cupo",
+      Accept: "text/xml; charset=utf-8",
+      "Accept-Charset": "utf-8, *;q=0.8",
+      "Accept-Language": "es, es-ES;q=0.9, *;q=0.8",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+      Connection: "keep-alive",
+    }
+
+    // Make SOAP request with axios
+    const response = await axios.post(SOAP_URL, soapBody, {
+      headers,
+      responseType: "text",
+      responseEncoding: "utf8",
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      transformResponse: [
+        (data) => {
+          // If it comes as Buffer, convert to UTF-8 string
+          if (Buffer.isBuffer(data)) {
+            return data.toString("utf8")
+          }
+          return data
+        },
+      ],
+    })
+
+    // Parse XML response
+    const parsedXml = await parseXmlResponse(response.data)
+
+    // Extract response data
+    const envelope = parsedXml["soap:Envelope"] || parsedXml["soapenv:Envelope"] || parsedXml.Envelope
+    const body = envelope?.["soap:Body"] || envelope?.["soapenv:Body"] || envelope?.Body
+    const responseNode = body?.valida_cupoResponse || body?.["valida_cupoResponse"]
+    const resultRaw = responseNode?.valida_cupoResult || responseNode?.["valida_cupoResult"]
+
+    if (!resultRaw) {
+      throw new Error("Unrecognized response structure for cupo validation")
+    }
+
+    // Extract the value (can be JSON string or object)
+    const resultValue = extractValue(resultRaw)
+
+    // If it's a JSON string, parse it
+    if (typeof resultValue === "string") {
+      try {
+        const jsonParsed = JSON.parse(resultValue)
+        return {
+          returnCode: jsonParsed.codret || "0",
+          message: jsonParsed.mensaje || resultValue,
+          idSolicitud: jsonParsed.id_solicitud,
+          celular: jsonParsed.celular,
+          cupoAutorizado: jsonParsed.cupo_autorizado ? Number.parseFloat(jsonParsed.cupo_autorizado) : undefined,
+          comisionSobreCupo: jsonParsed.comision_sobre_cupo ? Number.parseFloat(jsonParsed.comision_sobre_cupo) : undefined,
+          porcComision: jsonParsed.porc_comision ? Number.parseFloat(jsonParsed.porc_comision) : undefined,
+          limMaxComBanda1: jsonParsed.limMaxComBanda1 ? Number.parseFloat(jsonParsed.limMaxComBanda1) : undefined,
+          comMinBanda1: jsonParsed.comMinBanda1 ? Number.parseFloat(jsonParsed.comMinBanda1) : undefined,
+          limMaxComBanda2: jsonParsed.limMaxComBanda2 ? Number.parseFloat(jsonParsed.limMaxComBanda2) : undefined,
+          comMinBanda2: jsonParsed.comMinBanda2 ? Number.parseFloat(jsonParsed.comMinBanda2) : undefined,
+        }
+      } catch (e) {
+        return {
+          returnCode: "0",
+          message: resultValue,
+        }
+      }
+    }
+
+    // If it's already an object, map it
+    return {
+      returnCode: resultValue.codret || "0",
+      message: resultValue.mensaje || "",
+      idSolicitud: resultValue.id_solicitud,
+      celular: resultValue.celular,
+      cupoAutorizado: resultValue.cupo_autorizado ? Number.parseFloat(resultValue.cupo_autorizado) : undefined,
+      comisionSobreCupo: resultValue.comision_sobre_cupo ? Number.parseFloat(resultValue.comision_sobre_cupo) : undefined,
+      porcComision: resultValue.porc_comision ? Number.parseFloat(resultValue.porc_comision) : undefined,
+      limMaxComBanda1: resultValue.limMaxComBanda1 ? Number.parseFloat(resultValue.limMaxComBanda1) : undefined,
+      comMinBanda1: resultValue.comMinBanda1 ? Number.parseFloat(resultValue.comMinBanda1) : undefined,
+      limMaxComBanda2: resultValue.limMaxComBanda2 ? Number.parseFloat(resultValue.limMaxComBanda2) : undefined,
+      comMinBanda2: resultValue.comMinBanda2 ? Number.parseFloat(resultValue.comMinBanda2) : undefined,
     }
   } catch (error) {
     if (axios.isAxiosError(error)) {

@@ -13,7 +13,10 @@ interface FormData {
   paymentFrequency: string
   verificationPhone: string
   requestedAmount: number
+  approvedAmount: number
 }
+
+type ErrorType = "token" | "cupo" | "general" | null
 
 interface WizardState {
   step: Step
@@ -23,8 +26,7 @@ interface WizardState {
   errorFromStep: Step | null
   setStep: (step: Step) => void
   setLoading: (loading: boolean) => void
-  setErrorMessage: (message: string | null) => void
-  setErrorStep: () => void
+  setErrorStep: (errorType?: ErrorType, errorMessage?: string) => void
   nextStep: () => void
   nextStepAsync: () => Promise<void>
   goToStepAsync: (step: Step) => Promise<void> // added goToStepAsync
@@ -48,12 +50,63 @@ export const useWizardStore = create<WizardState>((set) => ({
     salary: "",
     paymentFrequency: "",
     verificationPhone: "",
-    requestedAmount: 1500, // updated default requested amount to 1500
+    requestedAmount: 0,
+    approvedAmount: 0, // Default approved amount, will be updated from WS
   },
   setStep: (step) => set({ step }),
   setLoading: (loading) => set({ isLoading: loading }),
-  setErrorMessage: (message) => set({ errorMessage: message }),
-  setErrorStep: () => set((state) => ({ step: 5, errorFromStep: state.step })),
+  setErrorStep: (errorType, errorMessage) =>
+    set((state) => {
+      // Analyze error type and current step to decide where to go
+      const currentStep = state.step
+
+      // If error is from cupo validation, reset everything and go to fallback
+      if (errorType === "cupo") {
+        return {
+          step: 5, // Fallback step
+          errorFromStep: 1, // force to step1
+          errorMessage: errorMessage || "Error validating credit limit",
+          formData: {
+            identification: "",
+            fullName: "",
+            phone: "",
+            email: "",
+            nit: "",
+            startDate: "",
+            salary: "",
+            paymentFrequency: "",
+            verificationPhone: "",
+            requestedAmount: 0,
+            approvedAmount: 0,
+          },
+        }
+      }
+
+      // If error is from token validation in step2, stay in step2
+      if (errorType === "token") {
+        return {
+          step: 5, // Fallback step
+          errorFromStep: currentStep,
+          errorMessage: errorMessage || "Error validating token",
+        }
+      }
+
+      // If error is from step1, go back to step1
+      if (errorType === "general") {
+        return {
+          step: 5, // Fallback step
+          errorFromStep: 1, // force to step1
+          errorMessage: errorMessage || "Error processing form",
+        }
+      }
+
+      // Default: go to fallback (step 5)
+      return {
+        step: 5,
+        errorFromStep: currentStep,
+        errorMessage: errorMessage || "An error occurred",
+      }
+    }),
   nextStep: () => set((state) => ({ step: Math.min(state.step + 1, 5) as Step })),
   nextStepAsync: async () => {
     set({ isLoading: true })
@@ -86,7 +139,8 @@ export const useWizardStore = create<WizardState>((set) => ({
         salary: "",
         paymentFrequency: "",
         verificationPhone: "",
-        requestedAmount: 1500,
+        requestedAmount: 0,
+        approvedAmount: 0,
       },
     }),
 }))

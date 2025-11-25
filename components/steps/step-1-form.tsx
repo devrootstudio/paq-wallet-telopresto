@@ -21,7 +21,7 @@ export const ErrorTooltip = ({ message }: { message: string }) => {
 }
 
 export default function Step1Form() {
-  const { nextStepAsync, formData, updateFormData, isLoading, setLoading, setErrorStep, setErrorMessage } = useWizardStore()
+  const { nextStepAsync, formData, updateFormData, isLoading, setLoading, setErrorStep } = useWizardStore()
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [touched, setTouched] = useState<Record<string, boolean>>({})
 
@@ -177,18 +177,17 @@ export default function Step1Form() {
         // nextStepAsync manejará el isLoading (lo mantendrá en true durante la transición)
         await nextStepAsync()
       } else {
-        // Si hay error, guardar el mensaje y ir al step de error (fallback)
+        // Si hay error, usar setErrorStep para analizar y decidir a dónde ir
         const errorMsg = result.error || "Error al procesar el formulario"
-        setErrorMessage(errorMsg)
+        const errorType = result.errorType || "general"
         setLoading(false)
-        setErrorStep()
+        setErrorStep(errorType, errorMsg)
       }
     } catch (error) {
       console.error("Error submitting form:", error)
       const errorMsg = error instanceof Error ? error.message : "Error desconocido al enviar el formulario"
-      setErrorMessage(errorMsg)
       setLoading(false)
-      setErrorStep()
+      setErrorStep("general", errorMsg)
     }
   }
 

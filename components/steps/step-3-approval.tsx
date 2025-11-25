@@ -12,7 +12,7 @@ export default function Step3Approval() {
   const [editAmount, setEditAmount] = useState("")
   const [error, setError] = useState<string | null>(null) // state for validation error
 
-  const APPROVED_AMOUNT = 1500 // constant for approved amount
+  const APPROVED_AMOUNT = formData.approvedAmount || 0 // Get approved amount from store
 
   const handleEditClick = () => {
     setEditAmount(formData.requestedAmount.toString())
