@@ -23,6 +23,14 @@ export default function Step4Success() {
               )}
             </p>
           </div>
+          {formData.hasCommissionIssue && (
+            <div className="mt-4 p-3 bg-yellow-500/20 border border-yellow-500/50 rounded-lg">
+              <p className="text-xs text-yellow-700 dark:text-yellow-600 font-semibold text-center leading-relaxed">
+                ⚠️ Nota Administrativa: El desembolso se ejecutó correctamente, pero hubo un problema en el cobro de la comisión. 
+                Este tema será resuelto de forma administrativa.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="w-full px-4 mt-6 space-y-3">

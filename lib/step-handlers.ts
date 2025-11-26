@@ -81,7 +81,10 @@ export async function handleStep0Submit(
               if (step1Result.skipStep2 && step1Result.approvedAmount !== undefined) {
                 // Client already accepted terms (Code 24), cupo validated, skip to step 3
                 console.log("⏭️ Skipping step 2 (OTP), going directly to step 3")
-                store.updateFormData({ approvedAmount: step1Result.approvedAmount })
+                store.updateFormData({
+                  approvedAmount: step1Result.approvedAmount,
+                  idSolicitud: step1Result.idSolicitud || "",
+                })
                 store.setLoading(false)
                 await store.goToStepAsync(3)
               } else {
@@ -170,7 +173,10 @@ export async function handleStep1Submit(
       if (result.skipStep2 && result.approvedAmount !== undefined) {
         // Client already accepted terms (Code 24), cupo validated, skip to step 3
         console.log("⏭️ Skipping step 2 (OTP), going directly to step 3")
-        store.updateFormData({ approvedAmount: result.approvedAmount })
+        store.updateFormData({
+          approvedAmount: result.approvedAmount,
+          idSolicitud: result.idSolicitud || "",
+        })
         store.setLoading(false)
         await store.goToStepAsync(3)
       } else {
@@ -214,9 +220,12 @@ export async function handleStep2Submit(
     const result = await submitStep2Form(formDataToSubmit)
 
     if (result.success) {
-      // Update approved amount from response if available
+      // Update approved amount and idSolicitud from response if available
       if (result.approvedAmount !== undefined) {
-        store.updateFormData({ approvedAmount: result.approvedAmount })
+        store.updateFormData({
+          approvedAmount: result.approvedAmount,
+          idSolicitud: result.idSolicitud || "",
+        })
       }
 
       // If successful, advance to next step

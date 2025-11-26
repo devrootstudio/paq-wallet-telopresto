@@ -1,6 +1,13 @@
 "use server"
 
-import { queryClient, sendTokenTyc, validateTokenTyc, validateCupo, type QueryClientResponse } from "@/lib/soap-client"
+import {
+  queryClient,
+  sendTokenTyc,
+  validateTokenTyc,
+  validateCupo,
+  executeDisbursement,
+  type QueryClientResponse,
+} from "@/lib/soap-client"
 import { sendToMakeWebhook } from "@/lib/make-integration"
 
 interface Step0FormData {
@@ -21,10 +28,11 @@ interface Step1FormData {
 interface ServerActionResponse {
   success: boolean
   error?: string
-  errorType?: "token" | "cupo" | "general" | "phone_number" // Distinguish error types for step2
+  errorType?: "token" | "cupo" | "general" | "phone_number" | "disbursement" // Distinguish error types for step2
   approvedAmount?: number
   idSolicitud?: string
   skipStep2?: boolean // Indicates that step 2 (OTP) should be skipped
+  hasCommissionIssue?: boolean // Indicates code 34: disbursement successful but commission collection had issues
   clientData?: {
     identification?: string
     fullName?: string
@@ -578,6 +586,107 @@ export async function submitStep2Form(data: Step2FormData): Promise<ServerAction
       success: false,
       error: error instanceof Error ? error.message : "Unknown error processing token validation",
       errorType: "general", // Unknown errors default to general
+    }
+  }
+}
+
+interface Step3FormData {
+  phone: string
+  idSolicitud: string
+  monto: number
+  comision: number
+  autorizacion: string
+}
+
+/**
+ * Server action for step 3: Execute disbursement
+ * @param data - Disbursement data (phone, idSolicitud, monto, comision, autorizacion)
+ * @returns Response indicating success or failure
+ */
+export async function submitStep3Form(data: Step3FormData): Promise<ServerActionResponse> {
+  console.log("=== STEP 3 DISBURSEMENT EXECUTION ===")
+  console.log("Timestamp:", new Date().toISOString())
+  console.log("Phone:", data.phone)
+  console.log("ID Solicitud:", data.idSolicitud)
+  console.log("Monto:", data.monto)
+  console.log("Comision:", data.comision)
+  console.log("Autorizacion:", data.autorizacion)
+  console.log("===============================")
+
+  try {
+    // Validate input
+    if (!data.phone || !data.idSolicitud || !data.monto || data.comision < 0 || !data.autorizacion) {
+      return {
+        success: false,
+        error: "All fields are required and valid",
+        errorType: "disbursement",
+      }
+    }
+
+    // Execute disbursement
+    console.log("💰 Executing disbursement...")
+    console.log(`   Phone: ${data.phone}`)
+    console.log(`   ID Solicitud: ${data.idSolicitud}`)
+    console.log(`   Monto: Q${data.monto}`)
+    console.log(`   Comision: Q${data.comision}`)
+    console.log(`   Autorizacion: ${data.autorizacion}`)
+
+    let disbursementResponse
+    try {
+      disbursementResponse = await executeDisbursement(
+        data.phone,
+        data.idSolicitud,
+        data.monto,
+        data.comision,
+        data.autorizacion,
+      )
+    } catch (error) {
+      console.error("❌ Error executing disbursement:", error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Error executing disbursement. Please try again later.",
+        errorType: "disbursement",
+      }
+    }
+
+    // Check if disbursement was successful
+    // Code 0 = success, Code 34 = success in disbursement but error in commission collection (also consider success)
+    const returnCode = disbursementResponse.returnCode
+    const isSuccessful = returnCode === 0 || returnCode === "0" || returnCode === 34 || returnCode === "34"
+
+    if (!isSuccessful) {
+      // Disbursement failed
+      const errorMessage = disbursementResponse.message || "Error executing disbursement"
+      console.error("❌ Disbursement execution failed:")
+      console.error(`   Code: ${returnCode}`)
+      console.error(`   Message: ${errorMessage}`)
+
+      return {
+        success: false,
+        error: errorMessage,
+        errorType: "disbursement",
+      }
+    }
+
+    // Disbursement executed successfully
+    console.log("✅ Disbursement executed successfully")
+    console.log(`   Code: ${returnCode}`)
+    console.log(`   Message: ${disbursementResponse.message}`)
+    const hasCommissionIssue = returnCode === 34 || returnCode === "34"
+    if (hasCommissionIssue) {
+      console.warn("⚠️ Disbursement successful but commission collection had issues (Code 34)")
+    }
+
+    return {
+      success: true,
+      hasCommissionIssue: hasCommissionIssue,
+    }
+  } catch (error) {
+    console.error("❌ Error in submitStep3Form:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error processing disbursement",
+      errorType: "disbursement",
     }
   }
 }

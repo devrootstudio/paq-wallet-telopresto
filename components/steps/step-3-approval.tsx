@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { useState } from "react"
 import { Input } from "@/components/ui/input"
 import { ErrorTooltip } from "./step-1-form" // importing ErrorTooltip
+import { submitStep3Form } from "@/app/actions"
 
 // Helper function to calculate disbursement amount
 const calculateDisbursementAmount = (requestedAmount: number): number => {
@@ -31,12 +32,63 @@ const calculateDisbursementAmount = (requestedAmount: number): number => {
 }
 
 export default function Step3Approval() {
-  const { nextStepAsync, formData, updateFormData } = useWizardStore()
+  const { nextStepAsync, formData, updateFormData, setLoading, setErrorStep, isLoading } = useWizardStore()
   const [isEditing, setIsEditing] = useState(false)
   const [editAmount, setEditAmount] = useState("")
   const [error, setError] = useState<string | null>(null) // state for validation error
 
   const APPROVED_AMOUNT = formData.approvedAmount || 0 // Get approved amount from store
+
+  // Generate authorization number (timestamp-based)
+  const generateAutorizacion = (): string => {
+    return `AUTH-${Date.now()}-${Math.random().toString(36).substring(2, 9).toUpperCase()}`
+  }
+
+  const handleRequestDisbursement = async () => {
+    // Validate required data
+    if (!formData.phone || !formData.idSolicitud || !formData.requestedAmount || formData.requestedAmount <= 0) {
+      setError("Faltan datos necesarios para procesar la solicitud")
+      return
+    }
+
+    // Calculate commission (monto - disbursementAmount)
+    const comision = formData.requestedAmount - formData.disbursementAmount
+
+    // Generate authorization number
+    const autorizacion = generateAutorizacion()
+
+    setLoading(true)
+    setError(null)
+
+    try {
+      const result = await submitStep3Form({
+        phone: formData.phone,
+        idSolicitud: formData.idSolicitud,
+        monto: formData.requestedAmount,
+        comision: comision,
+        autorizacion: autorizacion,
+      })
+
+      if (result.success) {
+        // Disbursement successful, save commission issue flag if present
+        if (result.hasCommissionIssue) {
+          updateFormData({ hasCommissionIssue: true })
+        }
+        // Advance to step 4
+        await nextStepAsync()
+      } else {
+        // Disbursement failed
+        const errorMsg = result.error || "Error al ejecutar el desembolso"
+        setLoading(false)
+        setErrorStep("general", errorMsg)
+      }
+    } catch (error) {
+      console.error("Error executing disbursement:", error)
+      const errorMsg = error instanceof Error ? error.message : "Error desconocido al ejecutar el desembolso"
+      setLoading(false)
+      setErrorStep("general", errorMsg)
+    }
+  }
 
   // Calculate disbursement amount for display (use editAmount when editing, otherwise use formData)
   const currentAmount = isEditing
@@ -144,8 +196,13 @@ export default function Step3Approval() {
         <div className="flex flex-col gap-3 w-full mt-2">
           {!isEditing ? (
             <>
-              <Button onClick={nextStepAsync} variant="paqDark" className="rounded-full w-full text-sm h-12">
-                Solicítalo ahora
+              <Button
+                onClick={handleRequestDisbursement}
+                variant="paqDark"
+                className="rounded-full w-full text-sm h-12"
+                disabled={isLoading}
+              >
+                {isLoading ? "PROCESANDO..." : "Solicítalo ahora"}
               </Button>
 
               <Button
