@@ -327,7 +327,7 @@ export default function Step1Form() {
           <label className="text-white text-sm font-medium ml-1">Teléfono celular registrado en PAQ Wallet</label>
           <div className="relative">
             <Input
-              placeholder="5000 2184"
+              placeholder="5201 8854"
               type="tel"
               value={formatPhone(formData.phone)}
               onChange={handlePhoneChange}

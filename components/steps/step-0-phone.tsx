@@ -73,7 +73,7 @@ export default function Step0Phone() {
           </label>
           <div className="relative">
             <Input
-              placeholder="5000 2184"
+              placeholder="5201 8854"
               type="tel"
               maxLength={9}
               className={`h-14 text-lg tracking-widest text-center ${phoneError ? "border-red-500 focus-visible:ring-red-500" : ""}`}
