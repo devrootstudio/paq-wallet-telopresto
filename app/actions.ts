@@ -1,5 +1,6 @@
 "use server"
 
+import { headers } from "next/headers"
 import {
   queryClient,
   sendTokenTyc,
@@ -16,6 +17,90 @@ const TEST_PHONE = process.env.TEST_PHONE || "50502180"
 const TEST_APPROVED_AMOUNT = Number.parseInt(process.env.TEST_APPROVED_AMOUNT || "3500", 10)
 const TEST_ID_SOLICITUD = process.env.TEST_ID_SOLICITUD || "TEST-001"
 const TEST_TOKEN = process.env.TEST_TOKEN || "222222"
+
+// Allowed domain for Server Actions (security)
+const ALLOWED_DOMAIN = process.env.ALLOWED_DOMAIN || "https://paq-wallet-telopresto.vercel.app"
+const ALLOWED_DOMAINS = process.env.ALLOWED_DOMAINS
+  ? process.env.ALLOWED_DOMAINS.split(",").map((d) => d.trim())
+  : [ALLOWED_DOMAIN]
+
+// Allow localhost in development
+const isDevelopment = process.env.NODE_ENV === "development"
+const LOCALHOST_DOMAINS = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost", "http://127.0.0.1"]
+
+/**
+ * Validates that the request originates from an allowed domain
+ * This prevents external requests from calling Server Actions directly
+ * @returns true if request is allowed, false otherwise
+ */
+async function validateRequestOrigin(): Promise<boolean> {
+  try {
+    const headersList = await headers()
+    const origin = headersList.get("origin")
+    const referer = headersList.get("referer")
+    const host = headersList.get("host")
+
+    // Get the protocol (http/https) from origin or referer, default to https
+    const protocol = origin?.startsWith("https") || referer?.startsWith("https") ? "https" : "http"
+    
+    // Build the request origin URL
+    let requestOrigin = origin
+    if (!requestOrigin && referer) {
+      try {
+        requestOrigin = new URL(referer).origin
+      } catch {
+        // If referer is not a valid URL, try to extract origin manually
+        const refererMatch = referer.match(/^(https?:\/\/[^\/]+)/)
+        if (refererMatch) {
+          requestOrigin = refererMatch[1]
+        }
+      }
+    }
+    if (!requestOrigin && host) {
+      requestOrigin = `${protocol}://${host}`
+    }
+
+    if (!requestOrigin) {
+      console.warn("⚠️ Security: No origin/referer header found")
+      return false
+    }
+
+    // In development, allow localhost
+    if (isDevelopment) {
+      const isLocalhost = LOCALHOST_DOMAINS.some((localhostDomain) => {
+        return requestOrigin === localhostDomain || requestOrigin.startsWith(localhostDomain)
+      })
+      if (isLocalhost) {
+        console.log("✅ Security: Localhost request allowed (development mode)")
+        return true
+      }
+    }
+
+    // Check if request origin matches any allowed domain
+    const isAllowed = ALLOWED_DOMAINS.some((allowedDomain) => {
+      const normalizedAllowed = allowedDomain.replace(/\/$/, "") // Remove trailing slash
+      const normalizedOrigin = requestOrigin!.replace(/\/$/, "") // Remove trailing slash
+      return normalizedOrigin === normalizedAllowed || normalizedOrigin.startsWith(normalizedAllowed)
+    })
+
+    if (!isAllowed) {
+      console.error("🚫 Security: Request blocked - Invalid origin")
+      console.error(`   Request Origin: ${requestOrigin}`)
+      console.error(`   Allowed Domains: ${ALLOWED_DOMAINS.join(", ")}`)
+      if (isDevelopment) {
+        console.error(`   Localhost allowed: ${LOCALHOST_DOMAINS.join(", ")}`)
+      }
+      return false
+    }
+
+    console.log("✅ Security: Request origin validated")
+    console.log(`   Origin: ${requestOrigin}`)
+    return true
+  } catch (error) {
+    console.error("❌ Security: Error validating request origin:", error)
+    return false
+  }
+}
 
 interface Step0FormData {
   phone: string
@@ -60,6 +145,16 @@ interface ServerActionResponse {
  * @returns Response indicating if phone is registered
  */
 export async function submitStep0Form(data: Step0FormData): Promise<ServerActionResponse> {
+  // Validate request origin
+  const isValidOrigin = await validateRequestOrigin()
+  if (!isValidOrigin) {
+    return {
+      success: false,
+      error: "Unauthorized request origin",
+      errorType: "general",
+    }
+  }
+
   console.log("=== STEP 0 PHONE VALIDATION ===")
   console.log("Timestamp:", new Date().toISOString())
   console.log("Phone:", data.phone)
@@ -222,6 +317,16 @@ export async function submitStep0Form(data: Step0FormData): Promise<ServerAction
 }
 
 export async function submitStep1Form(data: Step1FormData): Promise<ServerActionResponse> {
+  // Validate request origin
+  const isValidOrigin = await validateRequestOrigin()
+  if (!isValidOrigin) {
+    return {
+      success: false,
+      error: "Unauthorized request origin",
+      errorType: "general",
+    }
+  }
+
   // Server log with all received fields
   console.log("=== STEP 1 FORM SUBMISSION ===")
   console.log("Timestamp:", new Date().toISOString())
@@ -479,6 +584,16 @@ interface Step2FormData {
  * @returns Response indicating success or failure
  */
 export async function resendToken(phone: string): Promise<ServerActionResponse> {
+  // Validate request origin
+  const isValidOrigin = await validateRequestOrigin()
+  if (!isValidOrigin) {
+    return {
+      success: false,
+      error: "Unauthorized request origin",
+      errorType: "general",
+    }
+  }
+
   console.log("=== RESEND TOKEN ===")
   console.log("Timestamp:", new Date().toISOString())
   console.log("Phone:", phone)
@@ -549,6 +664,16 @@ export async function resendToken(phone: string): Promise<ServerActionResponse> 
 }
 
 export async function submitStep2Form(data: Step2FormData): Promise<ServerActionResponse> {
+  // Validate request origin
+  const isValidOrigin = await validateRequestOrigin()
+  if (!isValidOrigin) {
+    return {
+      success: false,
+      error: "Unauthorized request origin",
+      errorType: "general",
+    }
+  }
+
   // Server log with received data
   console.log("=== STEP 2 FORM SUBMISSION ===")
   console.log("Timestamp:", new Date().toISOString())
@@ -731,6 +856,16 @@ interface Step3FormData {
  * @returns Response indicating success or failure
  */
 export async function submitStep3Form(data: Step3FormData): Promise<ServerActionResponse> {
+  // Validate request origin
+  const isValidOrigin = await validateRequestOrigin()
+  if (!isValidOrigin) {
+    return {
+      success: false,
+      error: "Unauthorized request origin",
+      errorType: "disbursement",
+    }
+  }
+
   console.log("=== STEP 3 DISBURSEMENT EXECUTION ===")
   console.log("Timestamp:", new Date().toISOString())
   console.log("Phone:", data.phone)
