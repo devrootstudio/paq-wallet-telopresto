@@ -18,6 +18,8 @@ interface FormData {
   idSolicitud: string // Request ID from cupo validation
   hasCommissionIssue: boolean // Indicates code 34: disbursement successful but commission collection had issues
   autorizacion: string // Authorization number generated at step 0 for end-to-end tracking
+  clientId: string // Client ID from system - used to determine if we should edit or create profile
+  nextAction: "create" | "edit" | "continue" // Indicates the next action for step 1
 }
 
 type ErrorType = "token" | "cupo" | "general" | "phone_number" | null
@@ -60,6 +62,8 @@ export const useWizardStore = create<WizardState>((set) => ({
     idSolicitud: "", // Request ID from cupo validation
     hasCommissionIssue: false, // Indicates code 34: disbursement successful but commission collection had issues
     autorizacion: "", // Authorization number generated at step 0 for end-to-end tracking
+    clientId: "", // Client ID from system - used to determine if we should edit or create profile
+    nextAction: "continue", // Default behavior: just continue normal flow
   },
   setStep: (step) => set({ step }),
   setLoading: (loading) => set({ isLoading: loading }),
@@ -90,6 +94,8 @@ export const useWizardStore = create<WizardState>((set) => ({
             idSolicitud: "",
             hasCommissionIssue: false,
             autorizacion: "",
+            clientId: "",
+            nextAction: "continue",
           },
         }
       }
@@ -195,6 +201,8 @@ export const useWizardStore = create<WizardState>((set) => ({
         idSolicitud: "",
         hasCommissionIssue: false,
         autorizacion: "",
+        clientId: "",
+        nextAction: "continue",
       },
     }),
 }))

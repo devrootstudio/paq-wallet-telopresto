@@ -57,7 +57,12 @@ export async function handleStep0Submit(
           console.log("✅ All client data is complete, executing step 1 form submission...")
           store.setLoading(true)
 
-          // Update store with all client data
+          // If data is already complete from WS, we DON'T need create/edit.
+          // We only continue the normal flow (continue).
+          const clientId = result.clientId || ""
+          const nextAction: "continue" = "continue"
+
+          // Update store with all client data (so UI stays in sync)
           store.updateFormData({
             identification: clientData.identification || "",
             phone: clientData.phone || cleanPhone,
@@ -67,6 +72,8 @@ export async function handleStep0Submit(
             startDate: clientData.startDate || "",
             salary: clientData.salary || "",
             paymentFrequency: clientData.paymentFrequency || "",
+            clientId,
+            nextAction,
           })
 
           try {
@@ -81,6 +88,8 @@ export async function handleStep0Submit(
               salary: clientData.salary || "",
               paymentFrequency: clientData.paymentFrequency || "",
               autorizacion: store.formData.autorizacion,
+              nextAction,
+              clientId,
             }
 
             // Call submitStep1Form to execute the full process
@@ -119,15 +128,47 @@ export async function handleStep0Submit(
         } else {
           // Some data is missing, go to step 1 to complete
           console.log("⚠️ Some client data is missing, redirecting to step 1")
+          
+          // Determine nextAction based on clientId
+          const clientId = result.clientId || ""
+          const nextAction = clientId ? "edit" : "create"
+          console.log(`   Client ID: ${clientId || "N/A"}`)
+          console.log(`   Next Action: ${nextAction}`)
+          
+          // Update formData with available client data (at least the phone)
+          store.updateFormData({
+            phone: clientData.phone || cleanPhone,
+            identification: clientData.identification || "",
+            fullName: clientData.fullName || "",
+            email: clientData.email || "",
+            nit: clientData.nit || "",
+            startDate: clientData.startDate || "",
+            salary: clientData.salary || "",
+            paymentFrequency: clientData.paymentFrequency || "",
+            clientId: clientId,
+            nextAction: nextAction,
+          })
           store.setLoading(false)
           await store.goToStepAsync(1)
         }
       } else {
         // No client data available, go to step 1 to fill form
         console.log("⚠️ No client data available, redirecting to step 1")
-        const errorMsg = "No client data available"
+        
+        // Determine nextAction based on clientId (should be empty for new clients)
+        const clientId = result.clientId || ""
+        const nextAction = clientId ? "edit" : "create"
+        console.log(`   Client ID: ${clientId || "N/A"}`)
+        console.log(`   Next Action: ${nextAction}`)
+        
+        // At least save the phone number and action info
+        store.updateFormData({
+          phone: cleanPhone,
+          clientId: clientId,
+          nextAction: nextAction,
+        })
         store.setLoading(false)
-        store.setErrorStep("general", errorMsg)
+        await store.goToStepAsync(1)
       }
     } else {
       // Use setErrorStep to analyze and decide where to go
@@ -175,6 +216,8 @@ export async function handleStep1Submit(
       salary: formData.salary,
       paymentFrequency: formData.paymentFrequency,
       autorizacion: store.formData.autorizacion,
+      nextAction: store.formData.nextAction,
+      clientId: store.formData.clientId,
     }
 
     // Call server action

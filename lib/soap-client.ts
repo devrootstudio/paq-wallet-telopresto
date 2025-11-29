@@ -59,6 +59,21 @@ export interface ExecuteDisbursementResponse {
   message: string
 }
 
+export interface RegisterClientResponse {
+  returnCode: string | number
+  message: string
+  idCliente?: string
+  celular?: string
+  numeroDispersiones?: string
+  promedioDispersiones?: string
+}
+
+export interface EditClientResponse {
+  returnCode: string | number
+  message: string
+  celular?: string
+}
+
 // Raw SOAP response interface (Spanish format from API)
 interface RawSoapResponse {
   codret: string | number
@@ -836,3 +851,255 @@ export async function executeDisbursement(
   }
 }
 
+
+// Function to build SOAP XML envelope for Registra_Cliente
+function buildRegisterClientSoapEnvelope(
+  username: string,
+  password: string,
+  numeroIdentificacion: string,
+  nombreCompleto: string,
+  celular: string,
+  email: string,
+  nit: string,
+  salarioMensual: number,
+  frecuenciaPago: string,
+): string {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <Registra_Cliente xmlns="http://www.paq.com.gt/">
+      <USERNAME>${escapeXml(username)}</USERNAME>
+      <PASSWORD>${escapeXml(password)}</PASSWORD>
+      <NUMERO_IDENTIFICACION>${escapeXml(numeroIdentificacion)}</NUMERO_IDENTIFICACION>
+      <NOMBRE_COMPLETO>${escapeXml(nombreCompleto)}</NOMBRE_COMPLETO>
+      <CELULAR>${escapeXml(celular)}</CELULAR>
+      <EMAIL>${escapeXml(email)}</EMAIL>
+      <NIT>${escapeXml(nit)}</NIT>
+      <SALARIO_MENSUAL>${salarioMensual}</SALARIO_MENSUAL>
+      <FRECUENCIA_PAGO>${escapeXml(frecuenciaPago)}</FRECUENCIA_PAGO>
+    </Registra_Cliente>
+  </soap:Body>
+</soap:Envelope>`
+}
+
+// Function to build SOAP XML envelope for Edita_Cliente
+function buildEditClientSoapEnvelope(
+  username: string,
+  password: string,
+  numeroIdentificacion: string,
+  nombreCompleto: string,
+  celular: string,
+  email: string,
+  nit: string,
+  salarioMensual: number,
+  frecuenciaPago: string,
+  status: string,
+): string {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <Edita_Cliente xmlns="http://www.paq.com.gt/">
+      <USERNAME>${escapeXml(username)}</USERNAME>
+      <PASSWORD>${escapeXml(password)}</PASSWORD>
+      <NUMERO_IDENTIFICACION>${escapeXml(numeroIdentificacion)}</NUMERO_IDENTIFICACION>
+      <NOMBRE_COMPLETO>${escapeXml(nombreCompleto)}</NOMBRE_COMPLETO>
+      <CELULAR>${escapeXml(celular)}</CELULAR>
+      <EMAIL>${escapeXml(email)}</EMAIL>
+      <NIT>${escapeXml(nit)}</NIT>
+      <SALARIO_MENSUAL>${salarioMensual}</SALARIO_MENSUAL>
+      <FRECUENCIA_PAGO>${escapeXml(frecuenciaPago)}</FRECUENCIA_PAGO>
+      <STATUS>${escapeXml(status)}</STATUS>
+    </Edita_Cliente>
+  </soap:Body>
+</soap:Envelope>`
+}
+
+/**
+ * Registers a new client in the PAQ system
+ */
+export async function registerClient(
+  numeroIdentificacion: string,
+  nombreCompleto: string,
+  celular: string,
+  email: string,
+  nit: string,
+  salarioMensual: number,
+  frecuenciaPago: string,
+): Promise<RegisterClientResponse> {
+  if (!USERNAME || !PASSWORD) {
+    throw new Error("SOAP credentials not configured")
+  }
+
+  const cleanPhone = celular.replace(/\s/g, "")
+  if (!cleanPhone || cleanPhone.length !== 8) {
+    throw new Error("Phone number must have 8 digits")
+  }
+
+  const normalizedFreq = frecuenciaPago.toUpperCase()
+  const freqChar = normalizedFreq === "MENSUAL" || normalizedFreq === "M" ? "M" : normalizedFreq === "QUINCENAL" || normalizedFreq === "Q" ? "Q" : frecuenciaPago
+
+  try {
+    const soapBody = buildRegisterClientSoapEnvelope(
+      USERNAME,
+      PASSWORD,
+      numeroIdentificacion,
+      nombreCompleto,
+      cleanPhone,
+      email,
+      nit,
+      salarioMensual,
+      freqChar,
+    )
+
+    const headers = {
+      "Content-Type": "text/xml; charset=utf-8",
+      SOAPAction: "http://www.paq.com.gt/Registra_Cliente",
+      Accept: "text/xml; charset=utf-8",
+    }
+
+    const response = await axios.post(SOAP_URL, soapBody, {
+      headers,
+      responseType: "text",
+      responseEncoding: "utf8",
+    })
+
+    const parsedXml = await parseXmlResponse(response.data)
+    const envelope = parsedXml["soap:Envelope"] || parsedXml["soapenv:Envelope"] || parsedXml.Envelope
+    const body = envelope?.["soap:Body"] || envelope?.["soapenv:Body"] || envelope?.Body
+    const responseNode = body?.Registra_ClienteResponse || body?.["Registra_ClienteResponse"]
+    const resultRaw = responseNode?.Registra_ClienteResult || responseNode?.["Registra_ClienteResult"]
+
+    if (!resultRaw) {
+      throw new Error("Unrecognized response structure for client registration")
+    }
+
+    const resultValue = extractValue(resultRaw)
+
+    if (typeof resultValue === "string") {
+      try {
+        const jsonParsed = JSON.parse(resultValue)
+        return {
+          returnCode: jsonParsed.codret || "0",
+          message: jsonParsed.mensaje || resultValue,
+          idCliente: jsonParsed.id_cliente,
+          celular: jsonParsed.celular,
+          numeroDispersiones: jsonParsed.numero_dispersiones,
+          promedioDispersiones: jsonParsed.promedio_dispersiones,
+        }
+      } catch (e) {
+        return {
+          returnCode: "0",
+          message: resultValue,
+        }
+      }
+    }
+
+    return {
+      returnCode: resultValue.codret || "0",
+      message: resultValue.mensaje || "",
+      idCliente: resultValue.id_cliente,
+      celular: resultValue.celular,
+      numeroDispersiones: resultValue.numero_dispersiones,
+      promedioDispersiones: resultValue.promedio_dispersiones,
+    }
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      throw new Error(`SOAP service connection error: ${error.message}`)
+    }
+    throw error
+  }
+}
+
+/**
+ * Edits an existing client in the PAQ system
+ */
+export async function editClient(
+  numeroIdentificacion: string,
+  nombreCompleto: string,
+  celular: string,
+  email: string,
+  nit: string,
+  salarioMensual: number,
+  frecuenciaPago: string,
+  status: string = "A",
+): Promise<EditClientResponse> {
+  if (!USERNAME || !PASSWORD) {
+    throw new Error("SOAP credentials not configured")
+  }
+
+  const cleanPhone = celular.replace(/\s/g, "")
+  if (!cleanPhone || cleanPhone.length !== 8) {
+    throw new Error("Phone number must have 8 digits")
+  }
+
+  const normalizedFreq = frecuenciaPago.toUpperCase()
+  const freqChar = normalizedFreq === "MENSUAL" || normalizedFreq === "M" ? "M" : normalizedFreq === "QUINCENAL" || normalizedFreq === "Q" ? "Q" : frecuenciaPago
+
+  const statusChar = status.toUpperCase().charAt(0)
+
+  try {
+    const soapBody = buildEditClientSoapEnvelope(
+      USERNAME,
+      PASSWORD,
+      numeroIdentificacion,
+      nombreCompleto,
+      cleanPhone,
+      email,
+      nit,
+      salarioMensual,
+      freqChar,
+      statusChar,
+    )
+
+    const headers = {
+      "Content-Type": "text/xml; charset=utf-8",
+      SOAPAction: "http://www.paq.com.gt/Edita_Cliente",
+      Accept: "text/xml; charset=utf-8",
+    }
+
+    const response = await axios.post(SOAP_URL, soapBody, {
+      headers,
+      responseType: "text",
+      responseEncoding: "utf8",
+    })
+
+    const parsedXml = await parseXmlResponse(response.data)
+    const envelope = parsedXml["soap:Envelope"] || parsedXml["soapenv:Envelope"] || parsedXml.Envelope
+    const body = envelope?.["soap:Body"] || envelope?.["soapenv:Body"] || envelope?.Body
+    const responseNode = body?.Edita_ClienteResponse || body?.["Edita_ClienteResponse"]
+    const resultRaw = responseNode?.Edita_ClienteResult || responseNode?.["Edita_ClienteResult"]
+
+    if (!resultRaw) {
+      throw new Error("Unrecognized response structure for client edit")
+    }
+
+    const resultValue = extractValue(resultRaw)
+
+    if (typeof resultValue === "string") {
+      try {
+        const jsonParsed = JSON.parse(resultValue)
+        return {
+          returnCode: jsonParsed.codret || "0",
+          message: jsonParsed.mensaje || resultValue,
+          celular: jsonParsed.celular,
+        }
+      } catch (e) {
+        return {
+          returnCode: "0",
+          message: resultValue,
+        }
+      }
+    }
+
+    return {
+      returnCode: resultValue.codret || "0",
+      message: resultValue.mensaje || "",
+      celular: resultValue.celular,
+    }
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      throw new Error(`SOAP service connection error: ${error.message}`)
+    }
+    throw error
+  }
+}

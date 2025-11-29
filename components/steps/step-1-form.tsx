@@ -86,7 +86,8 @@ export default function Step1Form() {
         break
       }
       case "salary": {
-        const salaryNum = Number.parseFloat(value.replace(/,/g, "")) || 0
+        const raw = typeof value === "string" ? value : String(value ?? "")
+        const salaryNum = Number.parseFloat(raw.replace(/,/g, "")) || 0
         if (salaryNum < 1000) {
           error = "Mínimo Q1,000.00"
         }

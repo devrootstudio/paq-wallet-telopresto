@@ -6,6 +6,8 @@ import {
   validateTokenTyc,
   validateCupo,
   executeDisbursement,
+  registerClient,
+  editClient,
   type QueryClientResponse,
 } from "@/lib/soap-client"
 import { sendToMakeWebhook } from "@/lib/make-integration"
@@ -58,6 +60,8 @@ interface Step1FormData {
   salary: string
   paymentFrequency: string
   autorizacion?: string // Authorization number for end-to-end tracking
+  nextAction?: "create" | "edit" | "continue" // Indicates if we should create, edit or just continue
+  clientId?: string // Client ID if editing
 }
 
 interface ServerActionResponse {
@@ -68,6 +72,7 @@ interface ServerActionResponse {
   idSolicitud?: string
   skipStep2?: boolean // Indicates that step 2 (OTP) should be skipped
   hasCommissionIssue?: boolean // Indicates code 34: disbursement successful but commission collection had issues
+  clientId?: string // Client ID from system - used to determine if we should edit or create profile
   clientData?: {
     identification?: string
     fullName?: string
@@ -163,8 +168,9 @@ export async function submitStep0Form(data: Step0FormData): Promise<ServerAction
     }
 
     // Check if query was successful
+    // Code 0 = success, Code 5 = client exists but profile incomplete (also treat as success)
     const returnCode = clientResponse.returnCode
-    const isSuccessful = returnCode === 0 || returnCode === "0"
+    const isSuccessful = returnCode === 0 || returnCode === "0" || returnCode === 5 || returnCode === "5"
 
     if (!isSuccessful) {
       // Client not registered or error in query
@@ -181,11 +187,46 @@ export async function submitStep0Form(data: Step0FormData): Promise<ServerAction
     }
 
     // Client found - phone is valid
+    const isCode5 = returnCode === 5 || returnCode === "5"
+    
+    if (isCode5) {
+      console.log("⚠️ Code 5: Client found but profile is incomplete")
+      console.log(`   Code: ${returnCode}`)
+      console.log(`   Message: ${clientResponse.message}`)
+      console.log("   Creating clean structure to redirect to step 1")
+      
+      // Code 5: clientData will be undefined, but try to extract clientId if available
+      const clientData = clientResponse.client
+      let clientId = ""
+      if (clientData && typeof clientData === "object" && clientData.id) {
+        clientId = clientData.id
+        console.log(`   Client ID found: ${clientId}`)
+      }
+      
+      // Code 5: create clean structure for step 1
+      const mappedClientData: ServerActionResponse["clientData"] = {
+        phone: cleanPhone,
+        identification: "",
+        fullName: "",
+        email: "",
+        nit: "",
+        startDate: "",
+        salary: "",
+        paymentFrequency: "",
+      }
+      
+      return {
+        success: true,
+        clientId: clientId,
+        clientData: mappedClientData,
+      }
+    }
+    
     console.log("✅ Client found in system")
     console.log(`   Code: ${returnCode}`)
     console.log(`   Message: ${clientResponse.message}`)
 
-    // Extract client data to pre-fill form
+    // Extract client data to pre-fill form (only for code 0)
     const clientData = clientResponse.client
     let mappedClientData: ServerActionResponse["clientData"] | undefined = undefined
 
@@ -243,8 +284,12 @@ export async function submitStep0Form(data: Step0FormData): Promise<ServerAction
       }
     }
 
+    // Extract clientId if available
+    const clientId = clientData && typeof clientData === "object" && clientData.id ? clientData.id : ""
+
     return {
       success: true,
+      clientId: clientId,
       clientData: mappedClientData,
     }
   } catch (error) {
@@ -321,77 +366,130 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
       }
     }
 
-    // STEP 1: Query if client is registered by phone number
-    console.log("🔍 Querying client in system...")
-    console.log(`   Phone: ${cleanPhone}`)
+    // STEP 1: Create or Edit client based on nextAction (when specified)
+    const nextAction = data.nextAction
+    const salaryNumber =
+      typeof data.salary === "string"
+        ? Number.parseFloat(data.salary.replace(/,/g, "")) || 0
+        : Number(data.salary) || 0
 
-    let clientResponse: QueryClientResponse | null = null
-    let clientExists = false
+    // Only mutate client when nextAction is explicitly "create" or "edit"
+    if (nextAction === "create" || nextAction === "edit") {
+      console.log(`🔄 ${nextAction === "edit" ? "Editing" : "Creating"} client...`)
+      console.log(`   Phone: ${cleanPhone}`)
+      console.log(`   Action: ${nextAction}`)
 
-    try {
-      clientResponse = await queryClient(cleanPhone)
-    } catch (error) {
-      console.error("❌ Error querying client:", error)
-      // Send to webhook even if query fails
-      await sendToMakeWebhook(1, data, null, false, data.autorizacion)
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Error querying service. Please try again later.",
-        errorType: "general", // Step1 errors stay in step1
+      let createEditResponse
+
+      try {
+        if (nextAction === "edit") {
+          // Edit existing client
+          console.log("✏️ Editing existing client...")
+          createEditResponse = await editClient(
+            data.identification,
+            data.fullName,
+            cleanPhone,
+            data.email,
+            data.nit,
+            salaryNumber,
+            data.paymentFrequency,
+            "A", // Status: A = Alta (active)
+          )
+        } else {
+          // Create new client
+          console.log("➕ Creating new client...")
+          createEditResponse = await registerClient(
+            data.identification,
+            data.fullName,
+            cleanPhone,
+            data.email,
+            data.nit,
+            salaryNumber,
+            data.paymentFrequency,
+          )
+        }
+      } catch (error) {
+        console.error(`❌ Error ${nextAction === "edit" ? "editing" : "creating"} client:`, error)
+        await sendToMakeWebhook(1, data, null, false, data.autorizacion)
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : `Error ${nextAction === "edit" ? "editing" : "creating"} client. Please try again later.`,
+          errorType: "general",
+        }
       }
-    }
 
-    // Check if query was successful
-    const returnCode = clientResponse.returnCode
-    const isSuccessful = returnCode === 0 || returnCode === "0"
-    clientExists = isSuccessful
+      // Check if create/edit was successful
+      const returnCode = createEditResponse.returnCode
+      const isSuccessful = returnCode === 0 || returnCode === "0"
 
-    if (!isSuccessful) {
-      // Client not registered or error in query
-      const errorMessage = clientResponse.message || "Phone number is not registered in the system"
-      console.error("❌ Client not found or query error:")
-      console.error(`   Code: ${returnCode}`)
-      console.error(`   Message: ${errorMessage}`)
+      if (!isSuccessful) {
+        const errorMessage = createEditResponse.message || `Error ${nextAction === "edit" ? "editing" : "creating"} client`
+        console.error(`❌ Client ${nextAction} failed:`)
+        console.error(`   Code: ${returnCode}`)
+        console.error(`   Message: ${errorMessage}`)
 
-      // Send to webhook with client not found
-      await sendToMakeWebhook(1, data, clientResponse, false, data.autorizacion)
+        await sendToMakeWebhook(1, data, null, false, data.autorizacion)
 
-      return {
-        success: false,
-        error: errorMessage,
-        errorType: "general", // Step1 errors stay in step1
+        return {
+          success: false,
+          error: errorMessage,
+          errorType: "general",
+        }
       }
+
+      // Client created/edited successfully
+      console.log(`✅ Client ${nextAction === "edit" ? "edited" : "created"} successfully`)
+      console.log(`   Code: ${returnCode}`)
+      console.log(`   Message: ${createEditResponse.message}`)
+      if (nextAction === "create" && "idCliente" in createEditResponse) {
+        console.log(`   Client ID: ${createEditResponse.idCliente || "N/A"}`)
+      }
+
+      // Create a mock QueryClientResponse for webhook compatibility
+      const mockClientResponse: QueryClientResponse = {
+        returnCode: 0,
+        message: createEditResponse.message,
+        client: {
+          id: nextAction === "create" && "idCliente" in createEditResponse ? String(createEditResponse.idCliente || "") : data.clientId || "",
+          status: "ACTIVE",
+          identificationNumber: data.identification,
+          fullName: data.fullName,
+          phone: cleanPhone,
+          email: data.email,
+          nit: data.nit,
+          startDate: data.startDate,
+          monthlySalary: data.salary,
+          paymentFrequency: data.paymentFrequency,
+        },
+      }
+
+      // Send to webhook with successful client create/edit
+      await sendToMakeWebhook(1, data, mockClientResponse, true, data.autorizacion)
+    } else {
+      // Default / continue behaviour: do NOT call Registra_Cliente/Edita_Cliente, just pass the data through
+      console.log("ℹ️ nextAction is not create/edit (undefined or \"continue\"), skipping client create/edit and passing data through")
+
+      const mockClientResponse: QueryClientResponse = {
+        returnCode: 0,
+        message: "Client create/edit bypassed",
+        client: {
+          id: data.clientId || "",
+          status: "A",
+          identificationNumber: data.identification,
+          fullName: data.fullName,
+          phone: cleanPhone,
+          email: data.email,
+          nit: data.nit,
+          startDate: data.startDate,
+          monthlySalary: data.salary,
+          paymentFrequency: data.paymentFrequency,
+        },
+      }
+
+      await sendToMakeWebhook(1, data, mockClientResponse, true, data.autorizacion)
     }
 
-    // Client found - process client data
-    console.log("✅ Client found in system")
-    console.log(`   Code: ${returnCode}`)
-    console.log(`   Message: ${clientResponse.message}`)
-
-    // Client data is already mapped to English camelCase format
-    const clientData = clientResponse.client
-
-    if (clientData && typeof clientData === "object") {
-      console.log("📋 Client Data:")
-      console.log(`   ID: ${clientData.id || "N/A"}`)
-      console.log(`   Status: ${clientData.status || "N/A"}`)
-      console.log(`   Name: ${clientData.fullName || "N/A"}`)
-      console.log(`   Phone: ${clientData.phone || "N/A"}`)
-      console.log(`   Email: ${clientData.email || "N/A"}`)
-    }
-
-    // Here you can add additional validations comparing form data
-    // with client data obtained from the system
-    // For example:
-    // - Verify that name matches
-    // - Verify that email matches
-    // - Verify that NIT matches
-    // - etc.
-
-    // Send to webhook with successful client query
-    await sendToMakeWebhook(1, data, clientResponse, true, data.autorizacion)
-
-    // Send OTP token to client's phone for step 2 validation
+    // Send OTP token to client's phone for step 2 validation (common flow)
     console.log("📱 Sending OTP token to client's phone...")
     try {
       // TEST MODE: Bypass token sending for test phone number
