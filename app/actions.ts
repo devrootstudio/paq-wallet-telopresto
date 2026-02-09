@@ -514,14 +514,19 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
         tokenReturnCode === "24"
 
       if (!tokenSuccess) {
-        // OTP sending failed - go to fallback
-        const errorMessage = tokenResponse.message || "Error sending OTP token"
+        // OTP sending failed - go to fallback with error message (and code for clarity)
+        const baseMessage = tokenResponse.message || "Error al enviar el SMS al cliente."
+        const errorMessage =
+          tokenReturnCode !== undefined && tokenReturnCode !== null && tokenReturnCode !== ""
+            ? `${baseMessage} (Código ${tokenReturnCode})`
+            : baseMessage
         console.error("❌ Error sending OTP token:")
         console.error(`   Code: ${tokenReturnCode}`)
         console.error(`   Message: ${errorMessage}`)
         return {
           success: false,
           error: errorMessage,
+          errorType: "token",
         }
       }
 
@@ -589,10 +594,11 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
     } catch (error) {
       // OTP sending failed - go to fallback
       console.error("❌ Error sending OTP token:", error)
-      const errorMessage = error instanceof Error ? error.message : "Error sending OTP token. Please try again later."
+      const errorMessage = error instanceof Error ? error.message : "Error al enviar el SMS. Por favor intenta de nuevo."
       return {
         success: false,
         error: errorMessage,
+        errorType: "token",
       }
     }
 
