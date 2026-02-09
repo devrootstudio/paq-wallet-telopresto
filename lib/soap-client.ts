@@ -6,6 +6,15 @@ const SOAP_URL = process.env.SOAP_URL || "https://www.paq.com.gt/paqadelaws_desa
 const USERNAME = process.env.SOAP_USERNAME
 const PASSWORD = decodeURIComponent(process.env.SOAP_PASSWORD_URL_ENCODE || "")
 
+/** Log SOAP request URL and body only on the server (for debugging). Redacts password in body. */
+function logSoapRequest(operation: string, url: string, body: string) {
+  if (typeof window !== "undefined") return
+  const redactedBody = body.replace(/<PASSWORD>[\s\S]*?<\/PASSWORD>/gi, "<PASSWORD>***</PASSWORD>")
+  console.log(`[SOAP] ${operation}`)
+  console.log(`[SOAP] URL: ${url}`)
+  console.log(`[SOAP] Body:\n${redactedBody}`)
+}
+
 // Type interfaces
 export interface ClientData {
   id?: string
@@ -362,6 +371,7 @@ export async function queryClient(phone: string): Promise<QueryClientResponse> {
     }
 
     // Make SOAP request with axios
+    logSoapRequest("Consulta_Cliente", SOAP_URL, soapBody)
     const response = await axios.post(SOAP_URL, soapBody, {
       headers,
       responseType: "text",
@@ -426,6 +436,7 @@ export async function sendTokenTyc(phone: string): Promise<SendTokenResponse> {
     }
 
     // Make SOAP request with axios
+    logSoapRequest("Envia_Token_TyC", SOAP_URL, soapBody)
     const response = await axios.post(SOAP_URL, soapBody, {
       headers,
       responseType: "text",
@@ -529,6 +540,7 @@ export async function validateTokenTyc(phone: string, token: string): Promise<Va
     }
 
     // Make SOAP request with axios
+    logSoapRequest("Valida_Token_TyC", SOAP_URL, soapBody)
     const response = await axios.post(SOAP_URL, soapBody, {
       headers,
       responseType: "text",
@@ -625,6 +637,7 @@ export async function validateCupo(phone: string): Promise<ValidateCupoResponse>
     }
 
     // Make SOAP request with axios
+    logSoapRequest("valida_cupo", SOAP_URL, soapBody)
     const response = await axios.post(SOAP_URL, soapBody, {
       headers,
       responseType: "text",
@@ -789,6 +802,7 @@ export async function executeDisbursement(
     }
 
     // Make SOAP request with axios
+    logSoapRequest("Ejecuta_Desembolso", SOAP_URL, soapBody)
     const response = await axios.post(SOAP_URL, soapBody, {
       headers,
       responseType: "text",
@@ -957,6 +971,7 @@ export async function registerClient(
       Accept: "text/xml; charset=utf-8",
     }
 
+    logSoapRequest("Registra_Cliente", SOAP_URL, soapBody)
     const response = await axios.post(SOAP_URL, soapBody, {
       headers,
       responseType: "text",
@@ -1057,6 +1072,7 @@ export async function editClient(
       Accept: "text/xml; charset=utf-8",
     }
 
+    logSoapRequest("Edita_Cliente", SOAP_URL, soapBody)
     const response = await axios.post(SOAP_URL, soapBody, {
       headers,
       responseType: "text",
