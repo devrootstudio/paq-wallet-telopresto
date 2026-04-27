@@ -1,5 +1,6 @@
 "use client"
 
+import { Suspense } from "react"
 import { useWizardStore } from "@/lib/store"
 import { Spinner } from "@/components/ui/spinner"
 import Step0Phone from "@/components/steps/step-0-phone"
@@ -8,8 +9,9 @@ import Step2Phone from "@/components/steps/step-2-phone"
 import Step3Approval from "@/components/steps/step-3-approval"
 import Step4Success from "@/components/steps/step-4-success"
 import Step5Error from "@/components/steps/step-5-error"
+import { DevWizardSeed } from "@/components/dev-wizard-seed"
 
-export default function Home() {
+function HomeInner() {
   const { step, isLoading } = useWizardStore()
 
   const renderStep = () => {
@@ -38,5 +40,18 @@ export default function Home() {
 
       <div className="w-full max-w-lg relative z-10 flex justify-center">{isLoading ? <Spinner /> : renderStep()}</div>
     </main>
+  )
+}
+
+export default function Home() {
+  return (
+    <>
+      {process.env.NODE_ENV === "development" && (
+        <Suspense fallback={null}>
+          <DevWizardSeed />
+        </Suspense>
+      )}
+      <HomeInner />
+    </>
   )
 }

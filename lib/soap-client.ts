@@ -15,6 +15,12 @@ function logSoapRequest(operation: string, url: string, body: string) {
   console.log(`[SOAP] Body:\n${redactedBody}`)
 }
 
+/** Log SOAP response XML only on the server (for debugging). */
+function logSoapResponse(operation: string, xmlBody: string) {
+  if (typeof window !== "undefined") return
+  console.log(`[SOAP] ${operation} Response (XML):\n${xmlBody}`)
+}
+
 // Type interfaces
 export interface ClientData {
   id?: string
@@ -390,6 +396,7 @@ export async function queryClient(phone: string): Promise<QueryClientResponse> {
     })
 
     // Parse XML response
+    logSoapResponse("Consulta_Cliente", response.data)
     const parsedXml = await parseXmlResponse(response.data)
     const responseData = extractResponseData(parsedXml)
 
@@ -455,6 +462,7 @@ export async function sendTokenTyc(phone: string): Promise<SendTokenResponse> {
     })
 
     // Parse XML response
+    logSoapResponse("Envia_Token_TyC", response.data)
     const parsedXml = await parseXmlResponse(response.data)
 
     // Extract response data
@@ -559,6 +567,7 @@ export async function validateTokenTyc(phone: string, token: string): Promise<Va
     })
 
     // Parse XML response
+    logSoapResponse("Valida_Token_TyC", response.data)
     const parsedXml = await parseXmlResponse(response.data)
 
     // Extract response data
@@ -656,6 +665,7 @@ export async function validateCupo(phone: string): Promise<ValidateCupoResponse>
     })
 
     // Parse XML response
+    logSoapResponse("valida_cupo", response.data)
     const parsedXml = await parseXmlResponse(response.data)
 
     // Extract response data
@@ -821,6 +831,7 @@ export async function executeDisbursement(
     })
 
     // Parse XML response
+    logSoapResponse("Ejecuta_Desembolso", response.data)
     const parsedXml = await parseXmlResponse(response.data)
 
     // Extract response data
@@ -978,6 +989,7 @@ export async function registerClient(
       responseEncoding: "utf8",
     })
 
+    logSoapResponse("Registra_Cliente", response.data)
     const parsedXml = await parseXmlResponse(response.data)
     const envelope = parsedXml["soap:Envelope"] || parsedXml["soapenv:Envelope"] || parsedXml.Envelope
     const body = envelope?.["soap:Body"] || envelope?.["soapenv:Body"] || envelope?.Body
@@ -1079,6 +1091,7 @@ export async function editClient(
       responseEncoding: "utf8",
     })
 
+    logSoapResponse("Edita_Cliente", response.data)
     const parsedXml = await parseXmlResponse(response.data)
     const envelope = parsedXml["soap:Envelope"] || parsedXml["soapenv:Envelope"] || parsedXml.Envelope
     const body = envelope?.["soap:Body"] || envelope?.["soapenv:Body"] || envelope?.Body
