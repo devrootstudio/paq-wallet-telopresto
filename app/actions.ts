@@ -16,7 +16,7 @@ import { createHash } from "crypto"
 import { generarPagare } from "@/lib/pagare"
 
 const ENABLE_TEST_BYPASS = process.env.ENABLE_TEST_BYPASS === "true" || process.env.ENABLE_TEST_BYPASS === "1"
-const TEST_PHONE = process.env.TEST_PHONE || "50502180"
+
 const TEST_APPROVED_AMOUNT = Number.parseInt(process.env.TEST_APPROVED_AMOUNT || "3500", 10)
 const TEST_ID_SOLICITUD = process.env.TEST_ID_SOLICITUD || "TEST-001"
 const TEST_TOKEN = process.env.TEST_TOKEN || "222222"
@@ -60,6 +60,10 @@ interface Step1FormData {
   startDate: string
   salary: string
   paymentFrequency: string
+  empresa?: string
+  edad?: string
+  estadoCivil?: string
+  domicilio?: string
   autorizacion?: string // Authorization number for end-to-end tracking
   nextAction?: "create" | "edit" | "continue" // Indicates if we should create, edit or just continue
   clientId?: string // Client ID if editing
@@ -909,6 +913,10 @@ interface Step3FormData {
   identification?: string
   fullName?: string
   email?: string
+  empresa?: string
+  edad?: string
+  estadoCivil?: string
+  domicilio?: string
   fingerprint?: string
   screenResolution?: string
   idiomaBrowser?: string
@@ -976,6 +984,10 @@ export async function submitStep3Form(data: Step3FormData): Promise<ServerAction
         identification: data.identification || "",
         fullName: data.fullName || "",
         email: data.email || "",
+        empresa: data.empresa || "",
+        edad: data.edad || "",
+        estadoCivil: data.estadoCivil || "",
+        domicilio: data.domicilio || "",
         autorizacion: data.autorizacion,
         requestedAmount: data.monto,
         comisionPorcentaje: data.comisionPorcentaje ?? (data.monto >= 701 ? 7.5 : data.monto >= 251 ? 6.5 : 0),
@@ -1052,6 +1064,10 @@ export async function submitStep3Form(data: Step3FormData): Promise<ServerAction
       identification: data.identification || "",
       fullName: data.fullName || "",
       email: data.email || "",
+      empresa: data.empresa || "",
+      edad: data.edad || "",
+      estadoCivil: data.estadoCivil || "",
+      domicilio: data.domicilio || "",
       autorizacion: data.autorizacion,
       requestedAmount: data.monto,
       comisionPorcentaje: data.comisionPorcentaje ?? 0,

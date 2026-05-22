@@ -21,6 +21,10 @@ export interface PagareInput {
   identification: string
   fullName: string
   email: string
+  empresa: string
+  edad: string
+  estadoCivil: string
+  domicilio: string
   autorizacion: string
   requestedAmount: number
   comisionPorcentaje: number
@@ -258,11 +262,11 @@ export async function generarPagare(input: PagareInput): Promise<string | null> 
       fecha_actual: dates.fechaActual,
 
       nombre_completo: input.fullName.toUpperCase(),
-      edad: "PENDIENTE",
-      estado_civil: "PENDIENTE",
+      edad: input.edad || "PENDIENTE",
+      estado_civil: input.estadoCivil || "PENDIENTE",
       numero_dpi: input.identification.replace(/(\d{4})(\d{5})(\d{4})/, "$1 $2 $3"),
-      direccion_completa: "PENDIENTE",
-      nombre_empresa: "PENDIENTE",
+      direccion_completa: input.domicilio || "PENDIENTE",
+      nombre_empresa: input.empresa || "PENDIENTE",
 
       monto_en_numeros: montoFormateado,
       monto_en_letras: numberToWords(Math.floor(input.requestedAmount)),

@@ -202,6 +202,10 @@ export async function handleStep1Submit(
     startDate: string
     salary: string
     paymentFrequency: string
+    empresa: string
+    edad: string
+    estadoCivil: string
+    domicilio: string
   },
   store: Pick<WizardState, "nextStepAsync" | "setLoading" | "setErrorStep" | "updateFormData" | "goToStepAsync" | "formData">,
 ) {
@@ -219,6 +223,10 @@ export async function handleStep1Submit(
       startDate: formData.startDate,
       salary: formData.salary,
       paymentFrequency: formData.paymentFrequency,
+      empresa: formData.empresa,
+      edad: formData.edad,
+      estadoCivil: formData.estadoCivil,
+      domicilio: formData.domicilio,
       autorizacion: store.formData.autorizacion,
       nextAction: store.formData.nextAction,
       clientId: store.formData.clientId,

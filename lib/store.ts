@@ -20,6 +20,10 @@ interface FormData {
   autorizacion: string // Authorization number generated at step 0 for end-to-end tracking
   clientId: string // Client ID from system - used to determine if we should edit or create profile
   nextAction: "create" | "edit" | "continue" // Indicates the next action for step 1
+  empresa: string
+  edad: string
+  estadoCivil: string
+  domicilio: string
   // Pagaré — device data collected client-side at Step 0
   fingerprint: string
   screenResolution: string
@@ -81,6 +85,10 @@ export const useWizardStore = create<WizardState>((set) => ({
     autorizacion: "", // Authorization number generated at step 0 for end-to-end tracking
     clientId: "", // Client ID from system - used to determine if we should edit or create profile
     nextAction: "continue", // Default behavior: just continue normal flow
+    empresa: "",
+    edad: "",
+    estadoCivil: "",
+    domicilio: "",
     fingerprint: "",
     screenResolution: "",
     idiomaBrowser: "",
@@ -120,6 +128,10 @@ export const useWizardStore = create<WizardState>((set) => ({
             autorizacion: "",
             clientId: "",
             nextAction: "continue",
+            empresa: "",
+            edad: "",
+            estadoCivil: "",
+            domicilio: "",
             // Device fields survive the reset — same browser/device between attempts
             fingerprint: state.formData.fingerprint,
             screenResolution: state.formData.screenResolution,
@@ -236,6 +248,10 @@ export const useWizardStore = create<WizardState>((set) => ({
         autorizacion: "",
         clientId: "",
         nextAction: "continue",
+        empresa: "",
+        edad: "",
+        estadoCivil: "",
+        domicilio: "",
         fingerprint: "",
         screenResolution: "",
         idiomaBrowser: "",

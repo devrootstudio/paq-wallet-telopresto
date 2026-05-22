@@ -8,6 +8,7 @@ import { ChevronDown } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { handleStep1Submit } from "@/lib/step-handlers"
+import { EMPRESAS_GT, SECTORES } from "@/lib/empresas"
 
 // Helper component for tooltips
 export const ErrorTooltip = ({ message }: { message: string }) => {
@@ -99,6 +100,31 @@ export default function Step1Form() {
         }
         break
       }
+      case "empresa": {
+        if (!value) {
+          error = "Selecciona tu empresa"
+        }
+        break
+      }
+      case "edad": {
+        const n = Number.parseInt(value, 10)
+        if (!value || isNaN(n) || n < 18 || n > 99) {
+          error = "Ingresa una edad válida (18–99)"
+        }
+        break
+      }
+      case "estadoCivil": {
+        if (!value) {
+          error = "Selecciona tu estado civil"
+        }
+        break
+      }
+      case "domicilio": {
+        if (!value || value.trim().length < 10) {
+          error = "Ingresa tu dirección completa"
+        }
+        break
+      }
     }
 
     return error
@@ -135,6 +161,10 @@ export default function Step1Form() {
       { name: "startDate", value: formData.startDate },
       { name: "salary", value: formData.salary },
       { name: "paymentFrequency", value: formData.paymentFrequency },
+      { name: "empresa", value: formData.empresa },
+      { name: "edad", value: formData.edad },
+      { name: "estadoCivil", value: formData.estadoCivil },
+      { name: "domicilio", value: formData.domicilio },
     ]
 
     fields.forEach((field) => {
@@ -165,6 +195,10 @@ export default function Step1Form() {
         startDate: formData.startDate,
         salary: formData.salary,
         paymentFrequency: formData.paymentFrequency,
+        empresa: formData.empresa,
+        edad: formData.edad,
+        estadoCivil: formData.estadoCivil,
+        domicilio: formData.domicilio,
       },
       {
         nextStepAsync,
@@ -324,6 +358,69 @@ export default function Step1Form() {
           </div>
         </div>
 
+        <div className="grid grid-cols-2 gap-4">
+          <div className="relative space-y-2">
+            <label className="text-white text-sm font-medium ml-1">Edad</label>
+            <div className="relative">
+              <Input
+                placeholder="32"
+                type="number"
+                inputMode="numeric"
+                min="18"
+                max="99"
+                value={formData.edad}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, "").slice(0, 2)
+                  handleChange("edad", val)
+                }}
+                onBlur={() => handleBlur("edad", formData.edad)}
+                className={cn(errors.edad && "border-red-500 focus-visible:ring-red-500")}
+              />
+              {errors.edad && <ErrorTooltip message={errors.edad} />}
+            </div>
+          </div>
+
+          <div className="relative space-y-2">
+            <label className="text-white text-sm font-medium ml-1">Estado civil</label>
+            <div className="relative">
+              <select
+                className={cn(
+                  "flex h-12 w-full appearance-none rounded-lg border border-input bg-white px-3 py-2 text-sm text-black ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+                  errors.estadoCivil && "border-red-500 focus-visible:ring-red-500",
+                )}
+                value={formData.estadoCivil}
+                onChange={(e) => {
+                  handleChange("estadoCivil", e.target.value)
+                  handleBlur("estadoCivil", e.target.value)
+                }}
+              >
+                <option value="" disabled hidden>Selecciona</option>
+                <option value="Soltero/a">Soltero/a</option>
+                <option value="Casado/a">Casado/a</option>
+                <option value="Unión de hecho">Unión de hecho</option>
+                <option value="Divorciado/a">Divorciado/a</option>
+                <option value="Viudo/a">Viudo/a</option>
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" />
+              {errors.estadoCivil && <ErrorTooltip message={errors.estadoCivil} />}
+            </div>
+          </div>
+        </div>
+
+        <div className="relative space-y-2">
+          <label className="text-white text-sm font-medium ml-1">Domicilio</label>
+          <div className="relative">
+            <Input
+              placeholder="5a. Avenida 12-34, Zona 10, Ciudad de Guatemala"
+              value={formData.domicilio}
+              onChange={(e) => handleChange("domicilio", e.target.value)}
+              onBlur={(e) => handleBlur("domicilio", e.target.value)}
+              className={cn(errors.domicilio && "border-red-500 focus-visible:ring-red-500")}
+            />
+            {errors.domicilio && <ErrorTooltip message={errors.domicilio} />}
+          </div>
+        </div>
+
         <div className="relative space-y-2">
           <label className="text-white text-sm font-medium ml-1">Teléfono celular registrado en PAQ Wallet</label>
           <div className="relative">
@@ -384,6 +481,36 @@ export default function Step1Form() {
               />
               {errors.startDate && <ErrorTooltip message={errors.startDate} />}
             </div>
+          </div>
+        </div>
+
+        <div className="relative space-y-2">
+          <label className="text-white text-sm font-medium ml-1">Empresa donde trabajas</label>
+          <div className="relative">
+            <select
+              className={cn(
+                "flex h-12 w-full appearance-none rounded-lg border border-input bg-white px-3 py-2 text-sm text-black ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+                errors.empresa && "border-red-500 focus-visible:ring-red-500",
+              )}
+              value={formData.empresa}
+              onChange={(e) => {
+                handleChange("empresa", e.target.value)
+                handleBlur("empresa", e.target.value)
+              }}
+            >
+              <option value="" disabled hidden>Selecciona tu empresa</option>
+              {SECTORES.map((sector) => (
+                <optgroup key={sector} label={sector}>
+                  {EMPRESAS_GT.filter((e) => e.sector === sector).map((empresa) => (
+                    <option key={empresa.value} value={empresa.label}>
+                      {empresa.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" />
+            {errors.empresa && <ErrorTooltip message={errors.empresa} />}
           </div>
         </div>
 
