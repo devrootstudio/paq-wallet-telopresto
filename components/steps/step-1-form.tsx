@@ -322,77 +322,78 @@ export default function Step1Form() {
     handleChange("startDate", formatted)
   }
 
+  const selectClass = (hasError: boolean) =>
+    cn(
+      "flex h-11 w-full appearance-none rounded-lg border border-input bg-white px-3 py-2 text-sm text-black ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+      hasError && "border-red-500 focus-visible:ring-red-500",
+    )
+
   return (
-    <div className="w-full max-w-md mx-auto px-4 py-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <h1 className="text-2xl font-bold text-white mb-6 text-center">
+    <div className="w-full max-w-xl mx-auto px-4 py-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <h1 className="text-xl font-bold text-white mb-4 text-center">
         Completa el formulario para aplicar a tu adelanto de salario
       </h1>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="relative space-y-2">
-          <label className="text-white text-sm font-medium ml-1">Número de identificación</label>
+      <form onSubmit={handleSubmit} className="space-y-3">
+
+        {/* Fila 1: DPI — ancho completo */}
+        <div className="relative space-y-1">
+          <label className="text-white text-xs font-medium ml-1">DPI</label>
           <div className="relative">
             <Input
               placeholder="2131 41001 0101"
               value={formatDPI(formData.identification)}
               onChange={handleDPIChange}
               onBlur={(e) => handleBlur("identification", formData.identification)}
-              className={cn(errors.identification && "border-red-500 focus-visible:ring-red-500")}
+              className={cn("h-11", errors.identification && "border-red-500 focus-visible:ring-red-500")}
               maxLength={15}
             />
             {errors.identification && <ErrorTooltip message={errors.identification} />}
           </div>
         </div>
 
-        <div className="relative space-y-2">
-          <label className="text-white text-sm font-medium ml-1">Nombre completo</label>
+        {/* Fila 2: Nombre — ancho completo */}
+        <div className="relative space-y-1">
+          <label className="text-white text-xs font-medium ml-1">Nombre completo</label>
           <div className="relative">
             <Input
               placeholder="Luis Enrique Rios Sierra"
               value={formData.fullName}
               onChange={(e) => handleChange("fullName", e.target.value)}
               onBlur={(e) => handleBlur("fullName", e.target.value)}
-              className={cn(errors.fullName && "border-red-500 focus-visible:ring-red-500")}
+              className={cn("h-11", errors.fullName && "border-red-500 focus-visible:ring-red-500")}
             />
             {errors.fullName && <ErrorTooltip message={errors.fullName} />}
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="relative space-y-2">
-            <label className="text-white text-sm font-medium ml-1">Edad</label>
+        {/* Fila 3: Edad | Estado civil | NIT — 3 columnas */}
+        <div className="grid grid-cols-3 gap-3">
+          <div className="relative space-y-1">
+            <label className="text-white text-xs font-medium ml-1">Edad</label>
             <div className="relative">
               <Input
                 placeholder="32"
-                type="number"
                 inputMode="numeric"
-                min="18"
-                max="99"
                 value={formData.edad}
                 onChange={(e) => {
                   const val = e.target.value.replace(/\D/g, "").slice(0, 2)
                   handleChange("edad", val)
                 }}
                 onBlur={() => handleBlur("edad", formData.edad)}
-                className={cn(errors.edad && "border-red-500 focus-visible:ring-red-500")}
+                className={cn("h-11", errors.edad && "border-red-500 focus-visible:ring-red-500")}
               />
               {errors.edad && <ErrorTooltip message={errors.edad} />}
             </div>
           </div>
 
-          <div className="relative space-y-2">
-            <label className="text-white text-sm font-medium ml-1">Estado civil</label>
+          <div className="relative space-y-1">
+            <label className="text-white text-xs font-medium ml-1">Estado civil</label>
             <div className="relative">
               <select
-                className={cn(
-                  "flex h-12 w-full appearance-none rounded-lg border border-input bg-white px-3 py-2 text-sm text-black ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
-                  errors.estadoCivil && "border-red-500 focus-visible:ring-red-500",
-                )}
+                className={selectClass(!!errors.estadoCivil)}
                 value={formData.estadoCivil}
-                onChange={(e) => {
-                  handleChange("estadoCivil", e.target.value)
-                  handleBlur("estadoCivil", e.target.value)
-                }}
+                onChange={(e) => { handleChange("estadoCivil", e.target.value); handleBlur("estadoCivil", e.target.value) }}
               >
                 <option value="" disabled hidden>Selecciona</option>
                 <option value="Soltero/a">Soltero/a</option>
@@ -401,110 +402,90 @@ export default function Step1Form() {
                 <option value="Divorciado/a">Divorciado/a</option>
                 <option value="Viudo/a">Viudo/a</option>
               </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" />
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-500 pointer-events-none" />
               {errors.estadoCivil && <ErrorTooltip message={errors.estadoCivil} />}
             </div>
           </div>
-        </div>
 
-        <div className="relative space-y-2">
-          <label className="text-white text-sm font-medium ml-1">Domicilio</label>
-          <div className="relative">
-            <Input
-              placeholder="5a. Avenida 12-34, Zona 10, Ciudad de Guatemala"
-              value={formData.domicilio}
-              onChange={(e) => handleChange("domicilio", e.target.value)}
-              onBlur={(e) => handleBlur("domicilio", e.target.value)}
-              className={cn(errors.domicilio && "border-red-500 focus-visible:ring-red-500")}
-            />
-            {errors.domicilio && <ErrorTooltip message={errors.domicilio} />}
-          </div>
-        </div>
-
-        <div className="relative space-y-2">
-          <label className="text-white text-sm font-medium ml-1">Teléfono celular registrado en PAQ Wallet</label>
-          <div className="relative">
-            <Input
-              placeholder="5201 8854"
-              type="tel"
-              value={formatPhone(formData.phone)}
-              onChange={handlePhoneChange}
-              onBlur={(e) => handleBlur("phone", formData.phone)}
-              className={cn(errors.phone && "border-red-500 focus-visible:ring-red-500")}
-              maxLength={9}
-            />
-            {errors.phone && <ErrorTooltip message={errors.phone} />}
-          </div>
-        </div>
-
-        <div className="relative space-y-2">
-          <label className="text-white text-sm font-medium ml-1">Correo electrónico</label>
-          <div className="relative">
-            <Input
-              placeholder="enrique.rios@paqwallet.com"
-              type="email"
-              value={formData.email}
-              onChange={(e) => handleChange("email", e.target.value)}
-              onBlur={(e) => handleBlur("email", e.target.value)}
-              className={cn(errors.email && "border-red-500 focus-visible:ring-red-500")}
-            />
-            {errors.email && <ErrorTooltip message={errors.email} />}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="relative space-y-2">
-            <label className="text-white text-sm font-medium ml-1">NIT</label>
+          <div className="relative space-y-1">
+            <label className="text-white text-xs font-medium ml-1">NIT</label>
             <div className="relative">
               <Input
                 placeholder="123456-K"
                 value={formData.nit}
                 onChange={(e) => handleChange("nit", e.target.value.toUpperCase())}
                 onBlur={(e) => handleBlur("nit", formData.nit)}
-                className={cn(errors.nit && "border-red-500 focus-visible:ring-red-500")}
+                className={cn("h-11", errors.nit && "border-red-500 focus-visible:ring-red-500")}
                 maxLength={10}
               />
               {errors.nit && <ErrorTooltip message={errors.nit} />}
             </div>
           </div>
+        </div>
 
-          <div className="relative space-y-2">
-            <label className="text-white text-sm font-medium ml-1">Fecha de alta</label>
+        {/* Fila 4: Teléfono | Email — 2 columnas */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="relative space-y-1">
+            <label className="text-white text-xs font-medium ml-1">Teléfono PAQ Wallet</label>
             <div className="relative">
               <Input
-                placeholder="DD-MM-YYYY"
-                value={formData.startDate}
-                onChange={handleDateChange}
-                onBlur={(e) => handleBlur("startDate", formData.startDate)}
-                className={cn(errors.startDate && "border-red-500 focus-visible:ring-red-500")}
-                maxLength={10}
+                placeholder="5201 8854"
+                type="tel"
+                value={formatPhone(formData.phone)}
+                onChange={handlePhoneChange}
+                onBlur={(e) => handleBlur("phone", formData.phone)}
+                className={cn("h-11", errors.phone && "border-red-500 focus-visible:ring-red-500")}
+                maxLength={9}
               />
-              {errors.startDate && <ErrorTooltip message={errors.startDate} />}
+              {errors.phone && <ErrorTooltip message={errors.phone} />}
+            </div>
+          </div>
+
+          <div className="relative space-y-1">
+            <label className="text-white text-xs font-medium ml-1">Correo</label>
+            <div className="relative">
+              <Input
+                placeholder="correo@ejemplo.com"
+                type="email"
+                value={formData.email}
+                onChange={(e) => handleChange("email", e.target.value)}
+                onBlur={(e) => handleBlur("email", e.target.value)}
+                className={cn("h-11", errors.email && "border-red-500 focus-visible:ring-red-500")}
+              />
+              {errors.email && <ErrorTooltip message={errors.email} />}
             </div>
           </div>
         </div>
 
-        <div className="relative space-y-2">
-          <label className="text-white text-sm font-medium ml-1">Empresa donde trabajas</label>
+        {/* Fila 5: Domicilio — ancho completo */}
+        <div className="relative space-y-1">
+          <label className="text-white text-xs font-medium ml-1">Domicilio (dirección de residencia)</label>
+          <div className="relative">
+            <Input
+              placeholder="5a. Av. 12-34, Zona 10, Ciudad de Guatemala"
+              value={formData.domicilio}
+              onChange={(e) => handleChange("domicilio", e.target.value)}
+              onBlur={(e) => handleBlur("domicilio", e.target.value)}
+              className={cn("h-11", errors.domicilio && "border-red-500 focus-visible:ring-red-500")}
+            />
+            {errors.domicilio && <ErrorTooltip message={errors.domicilio} />}
+          </div>
+        </div>
+
+        {/* Fila 6: Empresa — ancho completo */}
+        <div className="relative space-y-1">
+          <label className="text-white text-xs font-medium ml-1">Empresa</label>
           <div className="relative">
             <select
-              className={cn(
-                "flex h-12 w-full appearance-none rounded-lg border border-input bg-white px-3 py-2 text-sm text-black ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
-                errors.empresa && "border-red-500 focus-visible:ring-red-500",
-              )}
+              className={selectClass(!!errors.empresa)}
               value={formData.empresa}
-              onChange={(e) => {
-                handleChange("empresa", e.target.value)
-                handleBlur("empresa", e.target.value)
-              }}
+              onChange={(e) => { handleChange("empresa", e.target.value); handleBlur("empresa", e.target.value) }}
             >
               <option value="" disabled hidden>Selecciona tu empresa</option>
               {SECTORES.map((sector) => (
                 <optgroup key={sector} label={sector}>
                   {EMPRESAS_GT.filter((e) => e.sector === sector).map((empresa) => (
-                    <option key={empresa.value} value={empresa.label}>
-                      {empresa.label}
-                    </option>
+                    <option key={empresa.value} value={empresa.label}>{empresa.label}</option>
                   ))}
                 </optgroup>
               ))}
@@ -514,9 +495,25 @@ export default function Step1Form() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="relative space-y-2">
-            <label className="text-white text-sm font-medium ml-1">Salario</label>
+        {/* Fila 7: Fecha de alta | Salario | Frecuencia — 3 columnas */}
+        <div className="grid grid-cols-3 gap-3">
+          <div className="relative space-y-1">
+            <label className="text-white text-xs font-medium ml-1">Fecha de alta</label>
+            <div className="relative">
+              <Input
+                placeholder="DD-MM-YYYY"
+                value={formData.startDate}
+                onChange={handleDateChange}
+                onBlur={(e) => handleBlur("startDate", formData.startDate)}
+                className={cn("h-11", errors.startDate && "border-red-500 focus-visible:ring-red-500")}
+                maxLength={10}
+              />
+              {errors.startDate && <ErrorTooltip message={errors.startDate} />}
+            </div>
+          </div>
+
+          <div className="relative space-y-1">
+            <label className="text-white text-xs font-medium ml-1">Salario mensual</label>
             <div className="relative">
               <Input
                 placeholder="Q 3,500.00"
@@ -525,32 +522,25 @@ export default function Step1Form() {
                 value={formatSalaryDisplay(formData.salary)}
                 onChange={handleSalaryChange}
                 onBlur={(e) => handleBlur("salary", formData.salary)}
-                className={cn(errors.salary && "border-red-500 focus-visible:ring-red-500")}
+                className={cn("h-11", errors.salary && "border-red-500 focus-visible:ring-red-500")}
               />
               {errors.salary && <ErrorTooltip message={errors.salary} />}
             </div>
           </div>
-          <div className="relative space-y-2">
-            <label className="text-white text-sm font-medium ml-1">Frecuencia de pago</label>
+
+          <div className="relative space-y-1">
+            <label className="text-white text-xs font-medium ml-1">Frecuencia</label>
             <div className="relative">
               <select
-                className={cn(
-                  "flex h-12 w-full appearance-none rounded-lg border border-input bg-white px-3 py-2 text-sm text-black ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
-                  errors.paymentFrequency && "border-red-500 focus-visible:ring-red-500",
-                )}
+                className={selectClass(!!errors.paymentFrequency)}
                 value={formData.paymentFrequency}
-                onChange={(e) => {
-                  handleChange("paymentFrequency", e.target.value)
-                  handleBlur("paymentFrequency", e.target.value)
-                }}
+                onChange={(e) => { handleChange("paymentFrequency", e.target.value); handleBlur("paymentFrequency", e.target.value) }}
               >
-                <option value="" disabled hidden>
-                  Selecciona
-                </option>
+                <option value="" disabled hidden>Selecciona</option>
                 <option value="mensual">Mensual</option>
                 <option value="quincenal">Quincenal</option>
               </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" />
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-500 pointer-events-none" />
               {errors.paymentFrequency && <ErrorTooltip message={errors.paymentFrequency} />}
             </div>
           </div>
