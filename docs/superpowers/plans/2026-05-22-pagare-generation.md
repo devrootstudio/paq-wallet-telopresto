@@ -47,14 +47,14 @@ Expected: `added 1 package`, no errors.
 
 Append at the end of `.env.local`:
 ```
-PAGARE_WEBHOOK_URL=https://webhook.site/6b3593cf-608b-4e44-871a-c2e72d4b4196
+PAGARE_WEBHOOK_URL=https://hook.us2.make.com/lcxlurh4exdau4t51iyngr6wdwe6r66y
 ```
 
 - [ ] **Step 3: Add `PAGARE_WEBHOOK_URL` to `.env.dev`**
 
 Append at the end of `.env.dev`:
 ```
-PAGARE_WEBHOOK_URL=https://webhook.site/6b3593cf-608b-4e44-871a-c2e72d4b4196
+PAGARE_WEBHOOK_URL=https://hook.us2.make.com/lcxlurh4exdau4t51iyngr6wdwe6r66y
 ```
 
 - [ ] **Step 4: Commit**
