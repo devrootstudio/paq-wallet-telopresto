@@ -13,6 +13,7 @@ import {
 import { sendToMakeWebhook } from "@/lib/make-integration"
 import { validateSecurityToken } from "@/lib/security-token"
 import { createHash } from "crypto"
+import { generarPagare } from "@/lib/pagare"
 
 // Test mode configuration from environment variables
 const ENABLE_TEST_BYPASS = process.env.ENABLE_TEST_BYPASS === "true" || process.env.ENABLE_TEST_BYPASS === "1"
@@ -904,6 +905,23 @@ interface Step3FormData {
   monto: number
   comision: number
   autorizacion: string
+  // Pagaré audit fields — collected client-side
+  identification?: string
+  fullName?: string
+  email?: string
+  fingerprint?: string
+  screenResolution?: string
+  idiomaBrowser?: string
+  ipInfo?: {
+    ip: string
+    isp: string
+    ciudad: string
+    pais: string
+    geolocalizacion: string
+    countryCode: string
+  } | null
+  otpHash?: string
+  comisionPorcentaje?: number
 }
 
 /**
@@ -952,6 +970,21 @@ export async function submitStep3Form(data: Step3FormData): Promise<ServerAction
       console.log(`   Comision: Q${data.comision}`)
       console.log(`   Autorizacion: ${data.autorizacion}`)
       console.log("   ✅ TEST MODE: Disbursement bypassed successfully")
+
+      await generarPagare({
+        phone: cleanPhone,
+        identification: data.identification || "",
+        fullName: data.fullName || "",
+        email: data.email || "",
+        autorizacion: data.autorizacion,
+        requestedAmount: data.monto,
+        comisionPorcentaje: data.comisionPorcentaje ?? (data.monto >= 701 ? 7.5 : data.monto >= 251 ? 6.5 : 0),
+        fingerprint: data.fingerprint || "",
+        screenResolution: data.screenResolution || "",
+        idiomaBrowser: data.idiomaBrowser || "",
+        ipInfo: data.ipInfo ?? null,
+        otpHash: data.otpHash || "",
+      })
 
       return {
         success: true,
@@ -1012,6 +1045,21 @@ export async function submitStep3Form(data: Step3FormData): Promise<ServerAction
     if (hasCommissionIssue) {
       console.warn("⚠️ Disbursement successful but commission collection had issues (Code 34)")
     }
+
+    await generarPagare({
+      phone: cleanPhone,
+      identification: data.identification || "",
+      fullName: data.fullName || "",
+      email: data.email || "",
+      autorizacion: data.autorizacion,
+      requestedAmount: data.monto,
+      comisionPorcentaje: data.comisionPorcentaje ?? 0,
+      fingerprint: data.fingerprint || "",
+      screenResolution: data.screenResolution || "",
+      idiomaBrowser: data.idiomaBrowser || "",
+      ipInfo: data.ipInfo ?? null,
+      otpHash: data.otpHash || "",
+    })
 
     return {
       success: true,

@@ -83,6 +83,15 @@ export default function Step3Approval() {
         monto: formData.requestedAmount,
         comision: comision,
         autorizacion: autorizacion,
+        identification: formData.identification,
+        fullName: formData.fullName,
+        email: formData.email,
+        fingerprint: formData.fingerprint,
+        screenResolution: formData.screenResolution,
+        idiomaBrowser: formData.idiomaBrowser,
+        ipInfo: formData.ipInfo,
+        otpHash: formData.otpHash,
+        comisionPorcentaje: formData.comisionPorcentaje,
       })
 
       if (result.success) {
