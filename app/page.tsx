@@ -10,6 +10,7 @@ import Step3Approval from "@/components/steps/step-3-approval"
 import Step4Success from "@/components/steps/step-4-success"
 import Step5Error from "@/components/steps/step-5-error"
 import { DevWizardSeed } from "@/components/dev-wizard-seed"
+import { ClientInfoCollector } from "@/components/client-info-collector"
 
 function HomeInner() {
   const { step, isLoading } = useWizardStore()
@@ -46,6 +47,9 @@ function HomeInner() {
 export default function Home() {
   return (
     <>
+      <Suspense fallback={null}>
+        <ClientInfoCollector />
+      </Suspense>
       {process.env.NODE_ENV === "development" && (
         <Suspense fallback={null}>
           <DevWizardSeed />
