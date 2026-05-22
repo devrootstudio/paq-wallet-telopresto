@@ -12,6 +12,7 @@ import {
 } from "@/lib/soap-client"
 import { sendToMakeWebhook } from "@/lib/make-integration"
 import { validateSecurityToken } from "@/lib/security-token"
+import { createHash } from "crypto"
 
 // Test mode configuration from environment variables
 const ENABLE_TEST_BYPASS = process.env.ENABLE_TEST_BYPASS === "true" || process.env.ENABLE_TEST_BYPASS === "1"
@@ -83,6 +84,8 @@ interface ServerActionResponse {
     salary?: string
     paymentFrequency?: string
   }
+  otpHash?: string
+  comisionPorcentaje?: number
 }
 
 /**
@@ -585,6 +588,8 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
           approvedAmount: cupoResponse.cupoAutorizado,
           idSolicitud: cupoResponse.idSolicitud,
           skipStep2: true, // Skip OTP step and go directly to step 3
+          otpHash: "", // Code 24: T&C previously accepted, OTP not used in this flow
+          comisionPorcentaje: cupoResponse.porcComision ?? 0,
         }
       }
 
@@ -761,6 +766,8 @@ export async function submitStep2Form(data: Step2FormData): Promise<ServerAction
         success: true,
         approvedAmount: TEST_APPROVED_AMOUNT,
         idSolicitud: TEST_ID_SOLICITUD,
+        otpHash: createHash("sha256").update(cleanToken).digest("hex"),
+        comisionPorcentaje: TEST_APPROVED_AMOUNT >= 701 ? 7.5 : TEST_APPROVED_AMOUNT >= 251 ? 6.5 : 0,
       }
     }
 
@@ -831,6 +838,8 @@ export async function submitStep2Form(data: Step2FormData): Promise<ServerAction
         success: true,
         approvedAmount: TEST_APPROVED_AMOUNT,
         idSolicitud: TEST_ID_SOLICITUD,
+        otpHash: createHash("sha256").update(cleanToken).digest("hex"),
+        comisionPorcentaje: TEST_APPROVED_AMOUNT >= 701 ? 7.5 : TEST_APPROVED_AMOUNT >= 251 ? 6.5 : 0,
       }
     }
 
@@ -876,6 +885,8 @@ export async function submitStep2Form(data: Step2FormData): Promise<ServerAction
       success: true,
       approvedAmount: cupoResponse.cupoAutorizado,
       idSolicitud: cupoResponse.idSolicitud,
+      otpHash: createHash("sha256").update(cleanToken).digest("hex"),
+      comisionPorcentaje: cupoResponse.porcComision ?? 0,
     }
   } catch (error) {
     console.error("❌ Error in submitStep2Form:", error)

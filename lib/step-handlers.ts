@@ -106,6 +106,8 @@ export async function handleStep0Submit(
                 store.updateFormData({
                   approvedAmount: step1Result.approvedAmount,
                   idSolicitud: step1Result.idSolicitud || "",
+                  otpHash: step1Result.otpHash || "",
+                  comisionPorcentaje: step1Result.comisionPorcentaje ?? 0,
                 })
                 store.setLoading(false)
                 await store.goToStepAsync(3)
@@ -233,6 +235,8 @@ export async function handleStep1Submit(
         store.updateFormData({
           approvedAmount: result.approvedAmount,
           idSolicitud: result.idSolicitud || "",
+          otpHash: result.otpHash || "",
+          comisionPorcentaje: result.comisionPorcentaje ?? 0,
         })
         store.setLoading(false)
         await store.goToStepAsync(3)
@@ -283,6 +287,8 @@ export async function handleStep2Submit(
         store.updateFormData({
           approvedAmount: result.approvedAmount,
           idSolicitud: result.idSolicitud || "",
+          otpHash: result.otpHash || "",
+          comisionPorcentaje: result.comisionPorcentaje ?? 0,
         })
       }
 
