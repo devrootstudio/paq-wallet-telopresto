@@ -15,10 +15,7 @@ import { validateSecurityToken } from "@/lib/security-token"
 import { createHash } from "crypto"
 import { generarPagare } from "@/lib/pagare"
 
-// Test mode — never active in production regardless of env var value
-const ENABLE_TEST_BYPASS =
-  process.env.NODE_ENV !== "production" &&
-  (process.env.ENABLE_TEST_BYPASS === "true" || process.env.ENABLE_TEST_BYPASS === "1")
+const ENABLE_TEST_BYPASS = process.env.ENABLE_TEST_BYPASS === "true" || process.env.ENABLE_TEST_BYPASS === "1"
 const TEST_PHONE = process.env.TEST_PHONE || "50502180"
 const TEST_APPROVED_AMOUNT = Number.parseInt(process.env.TEST_APPROVED_AMOUNT || "3500", 10)
 const TEST_ID_SOLICITUD = process.env.TEST_ID_SOLICITUD || "TEST-001"
