@@ -180,7 +180,10 @@ export async function generarPagare(input: PagareInput): Promise<void> {
       fecha_actual: dates.fechaActual,
 
       nombre_completo: input.fullName.toUpperCase(),
+      edad: "PENDIENTE",
+      estado_civil: "PENDIENTE",
       numero_dpi: input.identification,
+      direccion_completa: "PENDIENTE",
       nombre_empresa: "PENDIENTE",
 
       monto_en_numeros: montoFormateado,
