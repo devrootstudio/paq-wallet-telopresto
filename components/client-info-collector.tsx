@@ -8,10 +8,10 @@ export function ClientInfoCollector() {
 
   useEffect(() => {
     // Synchronous — always available immediately
-    updateFormData({
-      screenResolution: `${screen.width}x${screen.height} @${window.devicePixelRatio}x`,
-      idiomaBrowser: navigator.language || "es-GT",
-    })
+    const screenRes = `${screen.width}x${screen.height} @${window.devicePixelRatio}x`
+    const idioma = navigator.language || "es-GT"
+    updateFormData({ screenResolution: screenRes, idiomaBrowser: idioma })
+    console.log("[ClientInfo] screen:", screenRes, "| idioma:", idioma)
 
     // FingerprintJS — async, fire-and-forget
     import("@fingerprintjs/fingerprintjs")
@@ -19,15 +19,23 @@ export function ClientInfoCollector() {
       .then((fp) => fp.get())
       .then((result) => {
         updateFormData({ fingerprint: result.visitorId })
+        console.log("[ClientInfo] fingerprint:", result.visitorId)
       })
-      .catch(() => {
-        // silently ignore — pagare proceeds without fingerprint
+      .catch((err) => {
+        console.warn("[ClientInfo] FingerprintJS failed:", err)
       })
 
     // IP geolocation — async, fire-and-forget
-    // Calling without an IP parameter: ipquery.io detects the browser's own public IP
-    fetch("https://api.ipquery.io/", { headers: { Accept: "application/json" } })
-      .then((r) => (r.ok ? r.json() : null))
+    // Step 1: GET / returns the client's public IP as plain text
+    // Step 2: GET /{ip} returns full JSON with location + ISP data
+    fetch("https://api.ipquery.io/")
+      .then((r) => (r.ok ? r.text() : null))
+      .then((ip) => {
+        if (!ip) return null
+        const cleanIp = ip.trim()
+        return fetch(`https://api.ipquery.io/${cleanIp}`, { headers: { Accept: "application/json" } })
+          .then((r) => (r.ok ? r.json() : null))
+      })
       .then((data) => {
         if (!data) return
         const lat: number | undefined = data.location?.latitude
@@ -36,19 +44,19 @@ export function ClientInfoCollector() {
           lat != null && lng != null
             ? `${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? "N" : "S"}, ${Math.abs(lng).toFixed(4)}° ${lng >= 0 ? "E" : "W"}`
             : ""
-        updateFormData({
-          ipInfo: {
-            ip: data.ip || "",
-            isp: data.isp?.isp || "",
-            ciudad: data.location?.city || "",
-            pais: data.location?.country || "",
-            geolocalizacion: geo,
-            countryCode: data.location?.country_code || "",
-          },
-        })
+        const ipInfo = {
+          ip: data.ip || "",
+          isp: data.isp?.isp || "",
+          ciudad: data.location?.city || "",
+          pais: data.location?.country || "",
+          geolocalizacion: geo,
+          countryCode: data.location?.country_code || "",
+        }
+        updateFormData({ ipInfo })
+        console.log("[ClientInfo] ipInfo:", ipInfo)
       })
-      .catch(() => {
-        // silently ignore — pagare proceeds without geo data
+      .catch((err) => {
+        console.warn("[ClientInfo] ipquery.io failed:", err)
       })
   }, []) // runs once on mount
 
