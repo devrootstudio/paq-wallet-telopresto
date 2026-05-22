@@ -130,7 +130,7 @@ export async function submitStep0Form(data: Step0FormData): Promise<ServerAction
     }
 
     // TEST MODE: Bypass for test phone number
-    if (ENABLE_TEST_BYPASS && cleanPhone === TEST_PHONE) {
+    if (ENABLE_TEST_BYPASS) {
       console.log("🧪 TEST MODE: Bypass activated for test phone number")
       console.log(`   Phone: ${cleanPhone}`)
       console.log("   Returning mock client data to allow progression to step 1")
@@ -336,7 +336,7 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
     const cleanPhone = data.phone.replace(/\s/g, "")
 
     // TEST MODE: Bypass for test phone number
-    if (ENABLE_TEST_BYPASS && cleanPhone === TEST_PHONE) {
+    if (ENABLE_TEST_BYPASS) {
       console.log("🧪 TEST MODE: Bypass activated for test phone number")
       console.log(`   Phone: ${cleanPhone}`)
       console.log("   Skipping client validation and OTP sending")
@@ -497,7 +497,7 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
     console.log("📱 Sending OTP token to client's phone...")
     try {
       // TEST MODE: Bypass token sending for test phone number
-      if (ENABLE_TEST_BYPASS && cleanPhone === TEST_PHONE) {
+      if (ENABLE_TEST_BYPASS) {
         console.log("🧪 TEST MODE: Bypass token sending for test phone number")
         console.log(`   Phone: ${cleanPhone}`)
         console.log(`   Test Token: ${TEST_TOKEN}`)
@@ -662,7 +662,7 @@ export async function resendToken(phone: string): Promise<ServerActionResponse> 
     }
 
     // TEST MODE: Bypass for test phone number
-    if (ENABLE_TEST_BYPASS && cleanPhone === TEST_PHONE) {
+    if (ENABLE_TEST_BYPASS) {
       console.log("🧪 TEST MODE: Bypass OTP resend for test phone number")
       console.log(`   Phone: ${cleanPhone}`)
       console.log("   ✅ TEST MODE: OTP resend bypassed successfully")
@@ -755,7 +755,7 @@ export async function submitStep2Form(data: Step2FormData): Promise<ServerAction
     const cleanPhone = data.phone.replace(/\s/g, "")
 
     // TEST MODE: Bypass for test phone number
-    if (ENABLE_TEST_BYPASS && cleanPhone === TEST_PHONE) {
+    if (ENABLE_TEST_BYPASS) {
       console.log("🧪 TEST MODE: Bypass activated for test phone number")
       console.log(`   Phone: ${cleanPhone}`)
       console.log(`   Token: ${cleanToken} (bypass - test mode)`)
@@ -830,7 +830,7 @@ export async function submitStep2Form(data: Step2FormData): Promise<ServerAction
     console.log(`   Phone: ${data.phone}`)
 
     // TEST MODE: Bypass cupo validation for test phone number
-    if (ENABLE_TEST_BYPASS && cleanPhone === TEST_PHONE) {
+    if (ENABLE_TEST_BYPASS) {
       console.log("🧪 TEST MODE: Bypass cupo validation")
       console.log(`   Returning mock approved amount: Q${TEST_APPROVED_AMOUNT}`)
       console.log(`   Mock ID Solicitud: ${TEST_ID_SOLICITUD}`)
@@ -962,7 +962,7 @@ export async function submitStep3Form(data: Step3FormData): Promise<ServerAction
     const cleanPhone = data.phone.replace(/\s/g, "")
 
     // TEST MODE: Bypass disbursement for test phone number
-    if (ENABLE_TEST_BYPASS && cleanPhone === TEST_PHONE) {
+    if (ENABLE_TEST_BYPASS) {
       console.log("🧪 TEST MODE: Bypass disbursement execution")
       console.log(`   Phone: ${cleanPhone}`)
       console.log(`   ID Solicitud: ${data.idSolicitud}`)
