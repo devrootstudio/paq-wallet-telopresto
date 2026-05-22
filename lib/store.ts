@@ -20,6 +20,21 @@ interface FormData {
   autorizacion: string // Authorization number generated at step 0 for end-to-end tracking
   clientId: string // Client ID from system - used to determine if we should edit or create profile
   nextAction: "create" | "edit" | "continue" // Indicates the next action for step 1
+  // Pagaré — device data collected client-side at Step 0
+  fingerprint: string
+  screenResolution: string
+  idiomaBrowser: string
+  ipInfo: {
+    ip: string
+    isp: string
+    ciudad: string
+    pais: string
+    geolocalizacion: string
+    countryCode: string
+  } | null
+  // Pagaré — transaction data captured at Step 2
+  otpHash: string
+  comisionPorcentaje: number
 }
 
 type ErrorType = "token" | "cupo" | "general" | "phone_number" | null
@@ -64,6 +79,12 @@ export const useWizardStore = create<WizardState>((set) => ({
     autorizacion: "", // Authorization number generated at step 0 for end-to-end tracking
     clientId: "", // Client ID from system - used to determine if we should edit or create profile
     nextAction: "continue", // Default behavior: just continue normal flow
+    fingerprint: "",
+    screenResolution: "",
+    idiomaBrowser: "",
+    ipInfo: null,
+    otpHash: "",
+    comisionPorcentaje: 0,
   },
   setStep: (step) => set({ step }),
   setLoading: (loading) => set({ isLoading: loading }),
@@ -96,6 +117,14 @@ export const useWizardStore = create<WizardState>((set) => ({
             autorizacion: "",
             clientId: "",
             nextAction: "continue",
+            // Device fields survive the reset — same browser/device between attempts
+            fingerprint: state.formData.fingerprint,
+            screenResolution: state.formData.screenResolution,
+            idiomaBrowser: state.formData.idiomaBrowser,
+            ipInfo: state.formData.ipInfo,
+            // Transaction fields reset
+            otpHash: "",
+            comisionPorcentaje: 0,
           },
         }
       }
@@ -203,6 +232,12 @@ export const useWizardStore = create<WizardState>((set) => ({
         autorizacion: "",
         clientId: "",
         nextAction: "continue",
+        fingerprint: "",
+        screenResolution: "",
+        idiomaBrowser: "",
+        ipInfo: null,
+        otpHash: "",
+        comisionPorcentaje: 0,
       },
     }),
 }))
