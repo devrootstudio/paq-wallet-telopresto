@@ -36,7 +36,7 @@ function HomeInner() {
 
   return (
     <>
-      {process.env.NEXT_PUBLIC_TEST_MODE === "true" && (
+      {process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_TEST_MODE === "true" && (
         <div className="fixed top-0 left-0 right-0 z-50 bg-amber-400 text-amber-950 text-xs font-bold text-center py-1 tracking-widest uppercase select-none">
           ⚠ Modo Test · Bypass Activo · No usar en producción
         </div>

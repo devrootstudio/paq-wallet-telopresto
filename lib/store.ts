@@ -35,6 +35,8 @@ interface FormData {
   // Pagaré — transaction data captured at Step 2
   otpHash: string
   comisionPorcentaje: number
+  // Pagaré — PDF URL returned after disbursement
+  pagareUrl: string
 }
 
 type ErrorType = "token" | "cupo" | "general" | "phone_number" | null
@@ -85,6 +87,7 @@ export const useWizardStore = create<WizardState>((set) => ({
     ipInfo: null,
     otpHash: "",
     comisionPorcentaje: 0,
+    pagareUrl: "",
   },
   setStep: (step) => set({ step }),
   setLoading: (loading) => set({ isLoading: loading }),
@@ -125,6 +128,7 @@ export const useWizardStore = create<WizardState>((set) => ({
             // Transaction fields reset
             otpHash: "",
             comisionPorcentaje: 0,
+            pagareUrl: "",
           },
         }
       }
@@ -238,6 +242,7 @@ export const useWizardStore = create<WizardState>((set) => ({
         ipInfo: null,
         otpHash: "",
         comisionPorcentaje: 0,
+        pagareUrl: "",
       },
     }),
 }))

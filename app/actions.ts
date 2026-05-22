@@ -15,8 +15,10 @@ import { validateSecurityToken } from "@/lib/security-token"
 import { createHash } from "crypto"
 import { generarPagare } from "@/lib/pagare"
 
-// Test mode configuration from environment variables
-const ENABLE_TEST_BYPASS = process.env.ENABLE_TEST_BYPASS === "true" || process.env.ENABLE_TEST_BYPASS === "1"
+// Test mode — never active in production regardless of env var value
+const ENABLE_TEST_BYPASS =
+  process.env.NODE_ENV !== "production" &&
+  (process.env.ENABLE_TEST_BYPASS === "true" || process.env.ENABLE_TEST_BYPASS === "1")
 const TEST_PHONE = process.env.TEST_PHONE || "50502180"
 const TEST_APPROVED_AMOUNT = Number.parseInt(process.env.TEST_APPROVED_AMOUNT || "3500", 10)
 const TEST_ID_SOLICITUD = process.env.TEST_ID_SOLICITUD || "TEST-001"
@@ -87,6 +89,7 @@ interface ServerActionResponse {
   }
   otpHash?: string
   comisionPorcentaje?: number
+  pagareUrl?: string
 }
 
 /**
@@ -971,7 +974,7 @@ export async function submitStep3Form(data: Step3FormData): Promise<ServerAction
       console.log(`   Autorizacion: ${data.autorizacion}`)
       console.log("   ✅ TEST MODE: Disbursement bypassed successfully")
 
-      await generarPagare({
+      const pagareUrl = await generarPagare({
         phone: cleanPhone,
         identification: data.identification || "",
         fullName: data.fullName || "",
@@ -989,6 +992,7 @@ export async function submitStep3Form(data: Step3FormData): Promise<ServerAction
       return {
         success: true,
         hasCommissionIssue: false,
+        pagareUrl: pagareUrl || "",
       }
     }
 
@@ -1046,7 +1050,7 @@ export async function submitStep3Form(data: Step3FormData): Promise<ServerAction
       console.warn("⚠️ Disbursement successful but commission collection had issues (Code 34)")
     }
 
-    await generarPagare({
+    const pagareUrl = await generarPagare({
       phone: cleanPhone,
       identification: data.identification || "",
       fullName: data.fullName || "",
@@ -1064,6 +1068,7 @@ export async function submitStep3Form(data: Step3FormData): Promise<ServerAction
     return {
       success: true,
       hasCommissionIssue: hasCommissionIssue,
+      pagareUrl: pagareUrl || "",
     }
   } catch (error) {
     console.error("❌ Error in submitStep3Form:", error)

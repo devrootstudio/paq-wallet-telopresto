@@ -2,6 +2,8 @@ import { randomBytes, randomUUID, createHash } from "crypto"
 import { headers } from "next/headers"
 
 const PAGARE_WEBHOOK_URL = process.env.PAGARE_WEBHOOK_URL || ""
+const PDFMONKEY_API_KEY = process.env.PDFMONKEY_API_KEY || ""
+const PDFMONKEY_TEMPLATE_ID = process.env.PDFMONKEY_TEMPLATE_ID || "584A38C9-ECF6-4B21-8B32-894015F081D4"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -147,14 +149,90 @@ function sha256(input: string): string {
   return createHash("sha256").update(input, "utf8").digest("hex")
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// ─── PDF Monkey ───────────────────────────────────────────────────────────────
 
-export async function generarPagare(input: PagareInput): Promise<void> {
-  if (!PAGARE_WEBHOOK_URL) {
-    console.warn("[PAGARE] PAGARE_WEBHOOK_URL not set — skipping")
-    return
+async function generarPdf(payload: Record<string, unknown>): Promise<{ id: string; url: string | null }> {
+  if (!PDFMONKEY_API_KEY) {
+    console.warn("[PDFMONKEY] PDFMONKEY_API_KEY not set — skipping PDF generation")
+    return { id: "", url: null }
   }
 
+  // Create document
+  let documentId: string
+  try {
+    const createRes = await fetch("https://api.pdfmonkey.io/api/v1/documents", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${PDFMONKEY_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        document: {
+          document_template_id: PDFMONKEY_TEMPLATE_ID,
+          payload,
+          status: "pending",
+        },
+      }),
+    })
+
+    if (!createRes.ok) {
+      console.error(`[PDFMONKEY] ❌ Create failed: HTTP ${createRes.status}`)
+      return { id: "", url: null }
+    }
+
+    const createData = await createRes.json()
+    documentId = createData.document?.id
+
+    if (!documentId) {
+      console.error("[PDFMONKEY] ❌ No document ID in response")
+      return { id: "", url: null }
+    }
+
+    console.log(`[PDFMONKEY] Document created: ${documentId}`)
+  } catch (err) {
+    console.error("[PDFMONKEY] ❌ Error creating document:", err)
+    return { id: "", url: null }
+  }
+
+  // Poll for completion — max 5 attempts × 500ms = 2.5s
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    try {
+      const pollRes = await fetch(`https://api.pdfmonkey.io/api/v1/documents/${documentId}`, {
+        headers: { Authorization: `Bearer ${PDFMONKEY_API_KEY}` },
+      })
+
+      if (!pollRes.ok) continue
+
+      const pollData = await pollRes.json()
+      const status: string = pollData.document?.status
+      const url: string | null = pollData.document?.download_url || pollData.document?.permanent_download_url || null
+
+      console.log(`[PDFMONKEY] Poll ${attempt}/5: status=${status}`)
+
+      if (status === "success" && url) {
+        console.log(`[PDFMONKEY] ✅ PDF ready: ${url}`)
+        return { id: documentId, url }
+      }
+
+      if (status === "failure") {
+        console.error("[PDFMONKEY] ❌ Generation failed")
+        return { id: documentId, url: null }
+      }
+    } catch (err) {
+      console.warn(`[PDFMONKEY] Poll ${attempt} error:`, err)
+    }
+  }
+
+  // URL not ready within 2.5s — return ID so it can be retrieved later
+  console.warn("[PDFMONKEY] ⚠️ PDF not ready after 5 polls — document ID included for later retrieval")
+  return { id: documentId, url: null }
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
+export async function generarPagare(input: PagareInput): Promise<string | null> {
   try {
     const headerStore = await headers()
     const ua = headerStore.get("user-agent") || ""
@@ -182,7 +260,7 @@ export async function generarPagare(input: PagareInput): Promise<void> {
       nombre_completo: input.fullName.toUpperCase(),
       edad: "PENDIENTE",
       estado_civil: "PENDIENTE",
-      numero_dpi: input.identification,
+      numero_dpi: input.identification.replace(/(\d{4})(\d{5})(\d{4})/, "$1 $2 $3"),
       direccion_completa: "PENDIENTE",
       nombre_empresa: "PENDIENTE",
 
@@ -236,42 +314,54 @@ export async function generarPagare(input: PagareInput): Promise<void> {
     // Audit chain: combines both + timestamp
     const hashCadena = sha256(`${hashDocumento}|${hashFirma}|${dates.timestampUnixMs}`)
 
+    // Generate PDF via PDF Monkey
+    const { id: pagareDocumentoId, url: pagareUrl } = await generarPdf({
+      ...contentForHash,
+      hash_documento: hashDocumento,
+      hash_firma: hashFirma,
+      hash_cadena_auditoria: hashCadena,
+    })
+
     const finalPayload = {
       ...payload,
       hash_documento: hashDocumento,
       hash_firma: hashFirma,
       hash_cadena_auditoria: hashCadena,
+      pagare_documento_id: pagareDocumentoId || "",
+      pagare_url: pagareUrl || "",
     }
 
-    console.log("[PAGARE] Sending pagaré to webhook...")
-
-    // POST with 3s timeout — disbursement is already done, this must not hang
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 3000)
-
-    try {
-      const r = await fetch(PAGARE_WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(finalPayload),
-        signal: controller.signal,
-      })
-      clearTimeout(timeoutId)
-      if (r.ok) {
-        console.log("[PAGARE] ✅ Sent successfully")
-      } else {
-        console.error(`[PAGARE] ❌ HTTP ${r.status}`)
+    // Send webhook if configured
+    if (PAGARE_WEBHOOK_URL) {
+      console.log("[PAGARE] Sending pagaré to webhook...")
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 3000)
+      try {
+        const r = await fetch(PAGARE_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(finalPayload),
+          signal: controller.signal,
+        })
+        clearTimeout(timeoutId)
+        if (r.ok) console.log("[PAGARE] ✅ Webhook sent successfully")
+        else console.error(`[PAGARE] ❌ Webhook HTTP ${r.status}`)
+      } catch (fetchErr) {
+        clearTimeout(timeoutId)
+        if (fetchErr instanceof Error && fetchErr.name === "AbortError") {
+          console.warn("[PAGARE] ⚠️ Webhook timeout after 3s — moving on")
+        } else {
+          console.error("[PAGARE] ❌ Webhook error:", fetchErr instanceof Error ? fetchErr.message : fetchErr)
+        }
       }
-    } catch (fetchErr) {
-      clearTimeout(timeoutId)
-      if (fetchErr instanceof Error && fetchErr.name === "AbortError") {
-        console.warn("[PAGARE] ⚠️ Webhook timeout after 3s — moving on")
-      } else {
-        console.error("[PAGARE] ❌ Fetch error:", fetchErr instanceof Error ? fetchErr.message : fetchErr)
-      }
+    } else {
+      console.warn("[PAGARE] PAGARE_WEBHOOK_URL not set — skipping webhook")
     }
+
+    return pagareUrl
   } catch (err) {
     // Outer catch: never rethrow — pagare failure must never affect disbursement result
     console.error("[PAGARE] ❌ Unexpected error in generarPagare:", err)
+    return null
   }
 }

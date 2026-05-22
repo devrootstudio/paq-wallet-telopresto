@@ -58,6 +58,24 @@ export default function Step4Success() {
           )}
         </div>
 
+        {formData.pagareUrl && (
+          <div className="w-full px-4 mt-4">
+            <a
+              href={formData.pagareUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 w-full bg-paq-green text-white font-bold rounded-full py-3 text-sm hover:bg-paq-green/90 transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Descargar Pagaré
+            </a>
+          </div>
+        )}
+
         <div className="w-full px-4 mt-6 space-y-3">
           <p className="text-sm text-paq-green font-semibold text-center mb-2">
             Descarga Gratis El APP

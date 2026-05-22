@@ -95,10 +95,10 @@ export default function Step3Approval() {
       })
 
       if (result.success) {
-        // Disbursement successful, save commission issue flag if present
-        if (result.hasCommissionIssue) {
-          updateFormData({ hasCommissionIssue: true })
-        }
+        updateFormData({
+          hasCommissionIssue: result.hasCommissionIssue ?? false,
+          pagareUrl: result.pagareUrl || "",
+        })
         // Advance to step 4
         await nextStepAsync()
       } else {
