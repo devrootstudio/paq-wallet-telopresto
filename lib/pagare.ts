@@ -3,7 +3,7 @@ import { headers } from "next/headers"
 
 const PAGARE_WEBHOOK_URL = process.env.PAGARE_WEBHOOK_URL || ""
 const PDFMONKEY_API_KEY = process.env.PDFMONKEY_API_KEY || ""
-const PDFMONKEY_TEMPLATE_ID = process.env.PDFMONKEY_TEMPLATE_ID || "584A38C9-ECF6-4B21-8B32-894015F081D4"
+const PDFMONKEY_TEMPLATE_ID = process.env.PDFMONKEY_TEMPLATE_ID || "B574F307-926F-4E68-9C56-5859321A48FA"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
