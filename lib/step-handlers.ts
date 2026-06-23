@@ -39,122 +39,33 @@ export async function handleStep0Submit(
     const result = await submitStep0Form(formDataToSubmit)
 
     if (result.success) {
-      // If client data is available, pre-fill form fields
+      // If client data is available, pre-fill form fields and always go to Step 1
       if (result.clientData) {
         const clientData = result.clientData
 
-        // Check if all required fields are filled
-        const allFieldsFilled =
-          clientData.identification &&
-          clientData.fullName &&
-          clientData.email &&
-          clientData.nit &&
-          clientData.startDate &&
-          clientData.salary &&
-          clientData.paymentFrequency
+        // Always show Step 1 form (even when all fields are present),
+        // so the user can review/confirm their data before proceeding.
+        const clientId = result.clientId || ""
+        const nextAction = clientId ? "edit" : "create"
+        console.log("📋 Client data available, redirecting to step 1 for review")
+        console.log(`   Client ID: ${clientId || "N/A"}`)
+        console.log(`   Next Action: ${nextAction}`)
 
-        if (allFieldsFilled) {
-          // All data is complete, execute step 1 form submission process
-          // This will: validate client, send to webhook, send OTP token, etc.
-          console.log("✅ All client data is complete, executing step 1 form submission...")
-          store.setLoading(true)
-
-          // If data is already complete from WS, we DON'T need create/edit.
-          // We only continue the normal flow (continue).
-          const clientId = result.clientId || ""
-          const nextAction: "continue" = "continue"
-
-          // Update store with all client data (so UI stays in sync)
-          store.updateFormData({
-            identification: clientData.identification || "",
-            phone: clientData.phone || cleanPhone,
-            fullName: clientData.fullName || "",
-            email: clientData.email || "",
-            nit: clientData.nit || "",
-            startDate: clientData.startDate || "",
-            salary: clientData.salary || "",
-            paymentFrequency: clientData.paymentFrequency || "",
-            clientId,
-            nextAction,
-          })
-
-          try {
-            // Prepare form data for step 1 submission
-            const step1FormData = {
-              identification: clientData.identification || "",
-              fullName: clientData.fullName || "",
-              phone: clientData.phone || cleanPhone,
-              email: clientData.email || "",
-              nit: clientData.nit || "",
-              startDate: clientData.startDate || "",
-              salary: clientData.salary || "",
-              paymentFrequency: clientData.paymentFrequency || "",
-              autorizacion: store.formData.autorizacion,
-              nextAction,
-              clientId,
-            }
-
-            // Call submitStep1Form to execute the full process
-            // This will: validate client, send to webhook (Airtable), send OTP token
-            const step1Result = await submitStep1Form(step1FormData)
-
-            if (step1Result.success) {
-              // Check if we should skip step 2 (OTP validation)
-              if (step1Result.skipStep2 && step1Result.approvedAmount !== undefined) {
-                // Client already accepted terms (Code 24), cupo validated, skip to step 3
-                console.log("⏭️ Skipping step 2 (OTP), going directly to step 3")
-                store.updateFormData({
-                  approvedAmount: step1Result.approvedAmount,
-                  idSolicitud: step1Result.idSolicitud || "",
-                  otpHash: step1Result.otpHash || "",
-                  comisionPorcentaje: step1Result.comisionPorcentaje ?? 0,
-                })
-                store.setLoading(false)
-                await store.goToStepAsync(3)
-              } else {
-                // Normal flow: go to step 2 for OTP validation
-                store.setLoading(false)
-                await store.goToStepAsync(2)
-              }
-            } else {
-              // Error in step 1 process
-              const errorType = step1Result.errorType || "general"
-              const errorMsg = step1Result.error || "Error processing form"
-              store.setLoading(false)
-              store.setErrorStep(errorType, errorMsg)
-            }
-          } catch (error) {
-            console.error("Error executing step 1 form submission:", error)
-            const errorMsg = error instanceof Error ? error.message : "Error processing form"
-            store.setLoading(false)
-            store.setErrorStep("general", errorMsg)
-          }
-        } else {
-          // Some data is missing, go to step 1 to complete
-          console.log("⚠️ Some client data is missing, redirecting to step 1")
-          
-          // Determine nextAction based on clientId
-          const clientId = result.clientId || ""
-          const nextAction = clientId ? "edit" : "create"
-          console.log(`   Client ID: ${clientId || "N/A"}`)
-          console.log(`   Next Action: ${nextAction}`)
-          
-          // Update formData with available client data (at least the phone)
-          store.updateFormData({
-            phone: clientData.phone || cleanPhone,
-            identification: clientData.identification || "",
-            fullName: clientData.fullName || "",
-            email: clientData.email || "",
-            nit: clientData.nit || "",
-            startDate: clientData.startDate || "",
-            salary: clientData.salary || "",
-            paymentFrequency: clientData.paymentFrequency || "",
-            clientId: clientId,
-            nextAction: nextAction,
-          })
-          store.setLoading(false)
-          await store.goToStepAsync(1)
-        }
+        // Pre-fill store with all available client data
+        store.updateFormData({
+          phone: clientData.phone || cleanPhone,
+          identification: clientData.identification || "",
+          fullName: clientData.fullName || "",
+          email: clientData.email || "",
+          nit: clientData.nit || "",
+          startDate: clientData.startDate || "",
+          salary: clientData.salary || "",
+          paymentFrequency: clientData.paymentFrequency || "",
+          clientId: clientId,
+          nextAction: nextAction,
+        })
+        store.setLoading(false)
+        await store.goToStepAsync(1)
       } else {
         // No client data available, go to step 1 to fill form
         console.log("⚠️ No client data available, redirecting to step 1")
