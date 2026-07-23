@@ -328,6 +328,9 @@ export default function Step1Form() {
       hasError && "border-red-500 focus-visible:ring-red-500",
     )
 
+  // Gate: all other fields stay disabled until an empresa is selected
+  const empresaSelected = Boolean(formData.empresa)
+
   return (
     <div className="w-full max-w-xl mx-auto px-4 py-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <h1 className="text-xl font-bold text-white mb-4 text-center">
@@ -335,6 +338,34 @@ export default function Step1Form() {
       </h1>
 
       <form onSubmit={handleSubmit} className="space-y-3">
+
+        {/* Empresa — primer campo */}
+        <div className="relative space-y-1">
+          <label className="text-white text-xs font-medium ml-1">Empresa</label>
+          <div className="relative">
+            <select
+              className={selectClass(!!errors.empresa)}
+              value={formData.empresa}
+              onChange={(e) => { handleChange("empresa", e.target.value); handleBlur("empresa", e.target.value) }}
+            >
+              <option value="" disabled hidden>Selecciona tu empresa</option>
+              {SECTORES.map((sector) => (
+                <optgroup key={sector} label={sector}>
+                  {EMPRESAS_GT.filter((e) => e.sector === sector).map((empresa) => (
+                    <option key={empresa.value} value={empresa.label}>{empresa.label}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" />
+            {errors.empresa && <ErrorTooltip message={errors.empresa} />}
+          </div>
+          {!empresaSelected && (
+            <p className="text-paq-yellow text-xs ml-1 mt-1">
+              Selecciona tu empresa para habilitar el resto del formulario.
+            </p>
+          )}
+        </div>
 
         {/* Fila 1: DPI — ancho completo */}
         <div className="relative space-y-1">
@@ -346,6 +377,7 @@ export default function Step1Form() {
               onChange={handleDPIChange}
               onBlur={(e) => handleBlur("identification", formData.identification)}
               className={cn("h-11", errors.identification && "border-red-500 focus-visible:ring-red-500")}
+              disabled={!empresaSelected}
               maxLength={15}
             />
             {errors.identification && <ErrorTooltip message={errors.identification} />}
@@ -362,6 +394,7 @@ export default function Step1Form() {
               onChange={(e) => handleChange("fullName", e.target.value)}
               onBlur={(e) => handleBlur("fullName", e.target.value)}
               className={cn("h-11", errors.fullName && "border-red-500 focus-visible:ring-red-500")}
+              disabled={!empresaSelected}
             />
             {errors.fullName && <ErrorTooltip message={errors.fullName} />}
           </div>
@@ -382,6 +415,7 @@ export default function Step1Form() {
                 }}
                 onBlur={() => handleBlur("edad", formData.edad)}
                 className={cn("h-11", errors.edad && "border-red-500 focus-visible:ring-red-500")}
+                disabled={!empresaSelected}
               />
               {errors.edad && <ErrorTooltip message={errors.edad} />}
             </div>
@@ -392,6 +426,7 @@ export default function Step1Form() {
             <div className="relative">
               <select
                 className={selectClass(!!errors.estadoCivil)}
+                disabled={!empresaSelected}
                 value={formData.estadoCivil}
                 onChange={(e) => { handleChange("estadoCivil", e.target.value); handleBlur("estadoCivil", e.target.value) }}
               >
@@ -416,6 +451,7 @@ export default function Step1Form() {
                 onChange={(e) => handleChange("nit", e.target.value.toUpperCase())}
                 onBlur={(e) => handleBlur("nit", formData.nit)}
                 className={cn("h-11", errors.nit && "border-red-500 focus-visible:ring-red-500")}
+                disabled={!empresaSelected}
                 maxLength={10}
               />
               {errors.nit && <ErrorTooltip message={errors.nit} />}
@@ -435,6 +471,7 @@ export default function Step1Form() {
                 onChange={handlePhoneChange}
                 onBlur={(e) => handleBlur("phone", formData.phone)}
                 className={cn("h-11", errors.phone && "border-red-500 focus-visible:ring-red-500")}
+                disabled={!empresaSelected}
                 maxLength={9}
               />
               {errors.phone && <ErrorTooltip message={errors.phone} />}
@@ -451,6 +488,7 @@ export default function Step1Form() {
                 onChange={(e) => handleChange("email", e.target.value)}
                 onBlur={(e) => handleBlur("email", e.target.value)}
                 className={cn("h-11", errors.email && "border-red-500 focus-visible:ring-red-500")}
+                disabled={!empresaSelected}
               />
               {errors.email && <ErrorTooltip message={errors.email} />}
             </div>
@@ -467,35 +505,13 @@ export default function Step1Form() {
               onChange={(e) => handleChange("domicilio", e.target.value)}
               onBlur={(e) => handleBlur("domicilio", e.target.value)}
               className={cn("h-11", errors.domicilio && "border-red-500 focus-visible:ring-red-500")}
+              disabled={!empresaSelected}
             />
             {errors.domicilio && <ErrorTooltip message={errors.domicilio} />}
           </div>
         </div>
 
-        {/* Fila 6: Empresa — ancho completo */}
-        <div className="relative space-y-1">
-          <label className="text-white text-xs font-medium ml-1">Empresa</label>
-          <div className="relative">
-            <select
-              className={selectClass(!!errors.empresa)}
-              value={formData.empresa}
-              onChange={(e) => { handleChange("empresa", e.target.value); handleBlur("empresa", e.target.value) }}
-            >
-              <option value="" disabled hidden>Selecciona tu empresa</option>
-              {SECTORES.map((sector) => (
-                <optgroup key={sector} label={sector}>
-                  {EMPRESAS_GT.filter((e) => e.sector === sector).map((empresa) => (
-                    <option key={empresa.value} value={empresa.label}>{empresa.label}</option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" />
-            {errors.empresa && <ErrorTooltip message={errors.empresa} />}
-          </div>
-        </div>
-
-        {/* Fila 7: Fecha de alta | Salario | Frecuencia — 3 columnas */}
+        {/* Fila 6: Fecha de alta | Salario | Frecuencia — 3 columnas */}
         <div className="grid grid-cols-3 gap-3">
           <div className="relative space-y-1">
             <label className="text-white text-xs font-medium ml-1">Fecha de alta</label>
@@ -506,6 +522,7 @@ export default function Step1Form() {
                 onChange={handleDateChange}
                 onBlur={(e) => handleBlur("startDate", formData.startDate)}
                 className={cn("h-11", errors.startDate && "border-red-500 focus-visible:ring-red-500")}
+                disabled={!empresaSelected}
                 maxLength={10}
               />
               {errors.startDate && <ErrorTooltip message={errors.startDate} />}
@@ -523,6 +540,7 @@ export default function Step1Form() {
                 onChange={handleSalaryChange}
                 onBlur={(e) => handleBlur("salary", formData.salary)}
                 className={cn("h-11", errors.salary && "border-red-500 focus-visible:ring-red-500")}
+                disabled={!empresaSelected}
               />
               {errors.salary && <ErrorTooltip message={errors.salary} />}
             </div>
@@ -533,6 +551,7 @@ export default function Step1Form() {
             <div className="relative">
               <select
                 className={selectClass(!!errors.paymentFrequency)}
+                disabled={!empresaSelected}
                 value={formData.paymentFrequency}
                 onChange={(e) => { handleChange("paymentFrequency", e.target.value); handleBlur("paymentFrequency", e.target.value) }}
               >
@@ -550,7 +569,8 @@ export default function Step1Form() {
           <input
             type="checkbox"
             id="terms"
-            className="h-4 w-4 rounded border-gray-300 text-paq-light-green focus:ring-paq-light-green"
+            className="h-4 w-4 rounded border-gray-300 text-paq-light-green focus:ring-paq-light-green disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!empresaSelected}
             required
           />
           <label
