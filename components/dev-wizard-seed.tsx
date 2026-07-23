@@ -40,6 +40,7 @@ export function DevWizardSeed() {
       approvedAmount: 3500,
       requestedAmount: 2500,
       hasCommissionIssue: false,
+      pagareUrl: "/contrato-adelanto-salario.pdf",
     }
 
     if (n === 5) {
@@ -74,6 +75,13 @@ export function DevWizardSeed() {
         idSolicitud: demo.idSolicitud,
         approvedAmount: demo.approvedAmount,
         requestedAmount: demo.requestedAmount,
+      })
+    }
+
+    // Pagaré URL only exists after disbursement (Step 4) in the real flow
+    if (n >= 4) {
+      useWizardStore.getState().updateFormData({
+        pagareUrl: demo.pagareUrl,
       })
     }
 
