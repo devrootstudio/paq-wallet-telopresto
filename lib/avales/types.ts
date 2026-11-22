@@ -93,6 +93,8 @@ export type SubmitResult =
       requestId: string
       /** ISO 8601. Creation + 48 h. */
       expiresAt: string
+      /** Requested amount as stored (the original one when `reused`). */
+      requestedAmount: number
       /** true when a request with the same `authorization` already existed and was returned as is. */
       reused: boolean
     }

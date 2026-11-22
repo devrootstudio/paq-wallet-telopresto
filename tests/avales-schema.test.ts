@@ -12,7 +12,7 @@ function validRequest(overrides: Partial<GuarantorRequestInput> = {}): Guarantor
   return {
     authorization: "a1b2c3d4e5f60718293a4b5c6d7e8f9001122334455667788",
     applicant: {
-      phone: "55001122",
+      phone: "55559999",
       identification: "1000000000001",
       fullName: "Solicitante De Prueba",
       email: "solicitante@example.com",
@@ -109,7 +109,7 @@ describe("guarantorSchema", () => {
 })
 
 describe("makeGuarantorsSchema (Paso 3b)", () => {
-  const applicant = { phone: "5500 1122", identification: "1000000000001" }
+  const applicant = { phone: "5555 9999", identification: "1000000000001" }
   const g = validRequest().guarantors
 
   it("accepts three distinct guarantors", () => {
@@ -135,9 +135,32 @@ describe("makeGuarantorsSchema (Paso 3b)", () => {
     })
   })
 
+  it("reports duplicates even while other fields are still invalid", () => {
+    const r = makeGuarantorsSchema(applicant).safeParse([
+      { ...g[0], fullName: "" },
+      { ...g[1], phone: "5555 0001", relationship: undefined },
+      { fullName: "", phone: "", identification: "", relationship: undefined },
+    ])
+    expect(toFieldErrors(r.error!, "guarantors")).toEqual({
+      "guarantors.0.fullName": "El nombre es obligatorio",
+      "guarantors.0.phone": "Este teléfono ya está en otro aval",
+      "guarantors.1.phone": "Este teléfono ya está en otro aval",
+      "guarantors.1.relationship": "Selecciona la relación",
+      "guarantors.2.fullName": "El nombre es obligatorio",
+      "guarantors.2.phone": "El teléfono debe tener 8 dígitos",
+      "guarantors.2.identification": "El DPI debe tener 13 dígitos",
+      "guarantors.2.relationship": "Selecciona la relación",
+    })
+  })
+
+  it("parses to normalized output when valid", () => {
+    const out = makeGuarantorsSchema(applicant).parse([{ ...g[0], phone: "5555-0001" }, g[1], g[2]])
+    expect(out[0].phone).toBe("55550001")
+  })
+
   it("rejects the applicant's own phone or DPI (with separators)", () => {
     const r = makeGuarantorsSchema(applicant).safeParse([
-      { ...g[0], phone: "55001122" },
+      { ...g[0], phone: "55559999" },
       { ...g[1], identification: "1000 00000 0001" },
       g[2],
     ])
@@ -160,6 +183,19 @@ describe("guarantorRequestSchema (server revalidation)", () => {
       guarantors: [{ ...base.guarantors[0], phone: base.applicant.phone }, base.guarantors[1], base.guarantors[2]],
     })
     expect(errors).toEqual({ "guarantors.0.phone": "El teléfono del aval no puede ser el tuyo" })
+  })
+
+  it("merges cross-check errors with unrelated errors", () => {
+    const base = validRequest()
+    const errors = errorsOf({
+      ...base,
+      cupoId: "",
+      guarantors: [base.guarantors[0], { ...base.guarantors[1], identification: base.applicant.identification }, base.guarantors[2]],
+    })
+    expect(errors).toEqual({
+      cupoId: "Falta el id del cupo",
+      "guarantors.1.identification": "El DPI del aval no puede ser el tuyo",
+    })
   })
 
   it("rejects a malformed authorization (it is used inside a storage formula)", () => {
