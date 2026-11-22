@@ -76,6 +76,7 @@ describe("submit", () => {
       expiresAt: new Date(NOW.getTime() + EXPIRY_MS).toISOString(),
       requestedAmount: 1000,
       reused: false,
+      open: true,
     })
     expect(requests[0].fields).toMatchObject({
       authorization: "TEST-AVALES-unit-0001",
@@ -168,7 +169,7 @@ describe("submit", () => {
     expect(fake.rows("guarantors")).toHaveLength(0)
 
     const retry = await repo.submit(parsed())
-    expect(retry).toMatchObject({ requestId: fake.rows("requests")[0].id, reused: true })
+    expect(retry).toMatchObject({ requestId: fake.rows("requests")[0].id, reused: true, open: true })
     expect(fake.rows("guarantors").map((g) => g.fields.position).sort()).toEqual([1, 2, 3])
   })
 
@@ -246,17 +247,37 @@ describe("submit", () => {
     expect(fake.rows("guarantors").find((g) => g.fields.position === 1)!.fields["token-hash"]).toBe("h1")
   })
 
+  it("fails (never reports ok) when the write did not leave three guarantors with a status", async () => {
+    const { fake } = setup()
+    // Airtable answers 200 to the guarantor upsert but nothing is stored.
+    const lossy = createAvalesRepo({
+      airtable: createAirtableClient({
+        token: "t",
+        baseId: "appTEST0000000000",
+        fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+          if (init?.method === "PATCH" && String(url).includes("/guarantors") && String(init.body).includes("performUpsert")) {
+            return new Response(JSON.stringify({ records: [], createdRecords: [], updatedRecords: [] }), { status: 200 })
+          }
+          return fake.fetch(url, init)
+        }) as typeof fetch,
+      }),
+      now: () => NOW,
+    })
+    await expect(lossy.submit(parsed())).rejects.toThrow("Guarantors incomplete after write")
+    expect(fake.rows("guarantors")).toHaveLength(0)
+  })
+
   it("does not complete a request whose deadline passed, even if the job has not run", async () => {
     const { fake, repo } = setup()
     fake.seed("requests", { authorization: "TEST-AVALES-unit-0001", status: "pending_guarantors", "expires-at": "2026-11-22T11:00:00.000Z" })
-    expect(await repo.submit(parsed())).toMatchObject({ reused: true, expiresAt: "2026-11-22T11:00:00.000Z" })
+    expect(await repo.submit(parsed())).toMatchObject({ reused: true, open: false, expiresAt: "2026-11-22T11:00:00.000Z" })
     expect(fake.rows("guarantors")).toHaveLength(0)
   })
 
   it("returns a resolved request as is, without adding guarantors", async () => {
     const { fake, repo } = setup()
     const req = fake.seed("requests", { authorization: "TEST-AVALES-unit-0001", status: "expired", "expires-at": "2026-11-20T00:00:00.000Z" })
-    expect(await repo.submit(parsed())).toEqual({ requestId: req.id, expiresAt: "2026-11-20T00:00:00.000Z", requestedAmount: 1000, reused: true })
+    expect(await repo.submit(parsed())).toEqual({ requestId: req.id, expiresAt: "2026-11-20T00:00:00.000Z", requestedAmount: 1000, reused: true, open: false })
     expect(fake.rows("guarantors")).toHaveLength(0)
   })
 
