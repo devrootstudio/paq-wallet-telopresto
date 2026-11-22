@@ -70,9 +70,8 @@ describe("error routing (store.setErrorStep)", () => {
 
   it("disbursement on step 3: fallback that returns to step 3", () => {
     useWizardStore.setState({ step: 3 })
-    // submitStep3Form returns errorType "disbursement", which is not in the store's ErrorType:
-    // it falls through to the default branch (fallback that returns to the current step).
-    s().setErrorStep("disbursement" as any, "Fondos insuficientes")
+    // "disbursement" has no branch of its own: the default fallback returns to the current step.
+    s().setErrorStep("disbursement", "Fondos insuficientes")
     expect(s()).toMatchObject({ step: 5, errorFromStep: 3 })
   })
 })
