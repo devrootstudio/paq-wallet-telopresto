@@ -178,7 +178,8 @@ export async function requestGuarantors(
     const result = await send(input)
     if (result.ok) {
       store.setGuarantorRequest({
-        amount: result.reused ? null : input.requestedAmount,
+        // The amount as stored: the original one when the request already existed.
+        amount: result.requestedAmount,
         expiresAt: result.expiresAt,
         reused: result.reused,
       })

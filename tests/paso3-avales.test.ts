@@ -249,6 +249,15 @@ describe("Paso 3b form", () => {
     expect(errors["guarantors.2.identification"]).toBe("El DPI del aval no puede ser el tuyo")
   })
 
+  it("a repeated phone is marked on the first attempt, even with other fields still empty", () => {
+    const g = emptyGuarantors()
+    g[0].phone = "10000001"
+    g[1].phone = "10000001"
+    const errors = validateGuarantors(buildGuarantorRequest(formData, g))
+    expect(errors["guarantors.1.phone"]).toBe("Este teléfono ya está en otro aval")
+    expect(errors["guarantors.2.fullName"]).toBe("El nombre es obligatorio")
+  })
+
   it("errors outside the guarantors become one form error", () => {
     expect(splitFieldErrors({ "applicant.identification": "x", authorization: "y", "guarantors.0.phone": "z" })).toEqual({
       form: "Algunos datos de tu solicitud no son válidos. Recarga la página e inicia la solicitud de nuevo.",
@@ -277,6 +286,7 @@ describe("Paso 3b submit", () => {
       ok: true,
       requestId: "rec1",
       expiresAt: "2026-11-24T12:00:00.000Z",
+      requestedAmount: 2500,
       reused: false,
     })
     const store = fakeStore()
@@ -292,11 +302,17 @@ describe("Paso 3b submit", () => {
     expect(store.setAvalStage).toHaveBeenCalledWith("en-revision")
   })
 
-  it("a reused request (safe retry) does not claim the amount on screen", async () => {
-    m(submitGuarantorRequest).mockResolvedValue({ ok: true, requestId: "rec1", expiresAt: "2026-11-24T12:00:00.000Z", reused: true })
+  it("a reused request (safe retry) shows the amount as stored, not the one on screen", async () => {
+    m(submitGuarantorRequest).mockResolvedValue({
+      ok: true,
+      requestId: "rec1",
+      expiresAt: "2026-11-24T12:00:00.000Z",
+      requestedAmount: 1800,
+      reused: true,
+    })
     const store = fakeStore()
     await requestGuarantors(formData, validGuarantors(), store)
-    expect(store.setGuarantorRequest).toHaveBeenCalledWith({ amount: null, expiresAt: "2026-11-24T12:00:00.000Z", reused: true })
+    expect(store.setGuarantorRequest).toHaveBeenCalledWith({ amount: 1800, expiresAt: "2026-11-24T12:00:00.000Z", reused: true })
     expect(store.setAvalStage).toHaveBeenCalledWith("en-revision")
   })
 
@@ -351,11 +367,11 @@ describe("en revisión", () => {
     expect(html).toMatch(/47:5\d h/)
   })
 
-  it("a reused request shows no amount and says it was already received", () => {
-    view.state.guarantorRequest = { amount: null, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), reused: true }
+  it("a reused request shows the stored amount and says it was already received", () => {
+    view.state.guarantorRequest = { amount: 1800, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), reused: true }
     const html = renderToStaticMarkup(createElement(Step3cEnRevision))
     expect(html).toContain("Ya habíamos recibido tu solicitud")
-    expect(html).not.toContain("está reservado")
+    expect(html).toContain("Q1800.00")
   })
 
   it("time left is h:mm and never negative", () => {

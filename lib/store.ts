@@ -56,8 +56,8 @@ export type AvalStage = "avales" | "en-revision" | null
 
 /** What the "en revisión" screen needs once the request is saved. */
 export interface GuarantorRequestSummary {
-  /** null when the server returned an existing request: the saved amount may differ from the one on screen. */
-  amount: number | null
+  /** Requested amount as stored by the server (the original one when `reused`). */
+  amount: number
   expiresAt: string
   /** true when a request with the same authorization already existed (safe retry). */
   reused: boolean
