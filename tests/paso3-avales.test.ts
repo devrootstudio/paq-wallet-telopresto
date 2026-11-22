@@ -258,6 +258,32 @@ describe("Paso 3b form", () => {
     expect(errors["guarantors.2.fullName"]).toBe("El nombre es obligatorio")
   })
 
+  it("over-long applicant and device fields from earlier steps are clipped, never a dead end", () => {
+    const long = (n: number) => "x".repeat(n)
+    const input = buildGuarantorRequest(
+      {
+        ...formData,
+        fullName: `Solicitante   ${long(200)}`,
+        email: `${long(250)}@example.com`,
+        empresa: long(400),
+        edad: "123456789012345",
+        estadoCivil: long(80),
+        domicilio: long(1000),
+        fingerprint: long(500),
+        screenResolution: long(100),
+        idiomaBrowser: long(100),
+        otpHash: long(300),
+        ipInfo: { ip: long(100), isp: long(300), ciudad: long(300), pais: long(300), geolocalizacion: long(300), countryCode: long(20) },
+      },
+      validGuarantors(),
+    )
+    expect(input.applicant.fullName.startsWith("Solicitante x")).toBe(true)
+    expect(input.applicant.fullName.length).toBeLessThanOrEqual(120)
+    expect(input.applicant.address).toHaveLength(300)
+    expect(input.audit.ipInfo?.isp).toHaveLength(200)
+    expect(validateGuarantors(input)).toEqual({})
+  })
+
   it("errors outside the guarantors become one form error", () => {
     expect(splitFieldErrors({ "applicant.identification": "x", authorization: "y", "guarantors.0.phone": "z" })).toEqual({
       form: "Algunos datos de tu solicitud no son válidos. Recarga la página e inicia la solicitud de nuevo.",

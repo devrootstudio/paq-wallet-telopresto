@@ -71,6 +71,31 @@ export const phoneDigits = (value: string) => {
 
 const round2 = (n: number) => Math.round(n * 100) / 100
 
+/**
+ * Maximum lengths of the free-text fields that come from earlier steps or from the device, as in
+ * lib/avales/schema.ts. Earlier steps do not limit them, and an error there would leave the person
+ * with no way out of Step 3b, so they are clipped here instead of rejected.
+ */
+const MAX = {
+  fullName: 120,
+  email: 200,
+  company: 200,
+  age: 10,
+  maritalStatus: 50,
+  address: 300,
+  fingerprint: 200,
+  screenResolution: 50,
+  idiomaBrowser: 50,
+  otpHash: 128,
+  ipShort: 64,
+  ipText: 200,
+  countryCode: 10,
+} as const
+
+/** Trims, collapses inner whitespace and cuts to `max` characters. */
+export const clip = (value: string | null | undefined, max: number) =>
+  (value ?? "").trim().replace(/\s+/g, " ").slice(0, max).trim()
+
 type Store = Pick<WizardState, "formData">
 
 /** Everything `submitGuarantorRequest` needs, from the wizard store plus the 3 guarantors. */
@@ -81,12 +106,12 @@ export function buildGuarantorRequest(formData: Store["formData"], guarantors: G
     applicant: {
       phone: digits(formData.phone),
       identification: digits(formData.identification),
-      fullName: formData.fullName.trim(),
-      email: formData.email.trim(),
-      company: formData.empresa,
-      age: formData.edad,
-      maritalStatus: formData.estadoCivil,
-      address: formData.domicilio,
+      fullName: clip(formData.fullName, MAX.fullName),
+      email: clip(formData.email, MAX.email),
+      company: clip(formData.empresa, MAX.company),
+      age: clip(formData.edad, MAX.age),
+      maritalStatus: clip(formData.estadoCivil, MAX.maritalStatus),
+      address: clip(formData.domicilio, MAX.address),
     },
     // valida_cupo may hand it over as a number: the contract stores text.
     cupoId: String(formData.idSolicitud ?? ""),
@@ -104,11 +129,20 @@ export function buildGuarantorRequest(formData: Store["formData"], guarantors: G
       }),
     ) as GuarantorRequestInput["guarantors"],
     audit: {
-      fingerprint: formData.fingerprint,
-      screenResolution: formData.screenResolution,
-      idiomaBrowser: formData.idiomaBrowser,
-      ipInfo: formData.ipInfo,
-      otpHash: formData.otpHash,
+      fingerprint: clip(formData.fingerprint, MAX.fingerprint),
+      screenResolution: clip(formData.screenResolution, MAX.screenResolution),
+      idiomaBrowser: clip(formData.idiomaBrowser, MAX.idiomaBrowser),
+      ipInfo: formData.ipInfo
+        ? {
+            ip: clip(formData.ipInfo.ip, MAX.ipShort),
+            isp: clip(formData.ipInfo.isp, MAX.ipText),
+            ciudad: clip(formData.ipInfo.ciudad, MAX.ipText),
+            pais: clip(formData.ipInfo.pais, MAX.ipText),
+            geolocalizacion: clip(formData.ipInfo.geolocalizacion, MAX.ipText),
+            countryCode: clip(formData.ipInfo.countryCode, MAX.countryCode),
+          }
+        : null,
+      otpHash: clip(formData.otpHash, MAX.otpHash),
     },
   }
 }
