@@ -115,6 +115,8 @@ describe("/aval/<token> screens", () => {
     const { phoneDigits } = await import("@/components/aval/format")
     expect(phoneDigits("+502 1000 0001")).toBe("10000001")
     expect(phoneDigits("1000-0001")).toBe("10000001")
+    expect(phoneDigits("00502 1000 0001")).toBe("10000001")
+    expect(phoneDigits("5021 23456")).toBe("50212345")
   })
 
   it("time left is h:mm and never negative", () => {

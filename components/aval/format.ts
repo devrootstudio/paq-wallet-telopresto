@@ -33,8 +33,16 @@ export const formatPhone = (value: string) => {
 
 export const onlyDigits = digits
 
-/** Phone digits as typed or pasted: drops a leading Guatemala code ("+502 5512 3478" → "55123478"). */
+/**
+ * Phone digits as typed or pasted. A Guatemala code is dropped only when it is clearly a prefix:
+ * "+502 …", "00502 …" or 11 digits starting with 502 ("+502 5512 3478" → "55123478").
+ */
 export const phoneDigits = (value: string) => {
+  const trimmed = value.trim()
   const d = digits(value)
-  return (d.length > 8 && d.startsWith("502") ? d.slice(3) : d).slice(0, 8)
+  let local = d
+  if (trimmed.startsWith("+502")) local = d.slice(3)
+  else if (d.startsWith("00502")) local = d.slice(5)
+  else if (d.length === 11 && d.startsWith("502")) local = d.slice(3)
+  return local.slice(0, 8)
 }
