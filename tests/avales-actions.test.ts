@@ -88,7 +88,7 @@ describe("submitGuarantorRequest", () => {
   it("stores the request and is safe to resubmit", async () => {
     const first = await submitGuarantorRequest(input())
     const requestId = fake.rows("requests")[0].id
-    expect(first).toEqual({ ok: true, requestId, expiresAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/), requestedAmount: 1000, reused: false })
+    expect(first).toEqual({ ok: true, requestId, expiresAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/), requestedAmount: 1000, reused: false, open: true })
     const second = await submitGuarantorRequest(input())
     expect(second).toEqual({ ...first, reused: true })
     expect(fake.rows("requests")).toHaveLength(1)
@@ -143,9 +143,27 @@ describe("submitGuarantorRequest", () => {
     expect(logs.join("\n")).toContain("[avales] submit failed: 500 SERVER_ERROR")
     expectNoPiiInLogs()
   })
+
+  it("a partial failure answers unavailable and the retry completes it", async () => {
+    fake.failOn("PATCH", "guarantors", 429)
+    expect(await submitGuarantorRequest(input())).toEqual({ ok: false, code: "unavailable" })
+    const retry = await submitGuarantorRequest(input())
+    expect(retry).toMatchObject({ ok: true, reused: true, open: true })
+    expect(fake.rows("guarantors").filter((g) => g.fields.status === "pending")).toHaveLength(3)
+  })
 })
 
 describe("getGuarantorView", () => {
+  it("answers invalid for a malformed token without storage, even when it is not configured", async () => {
+    vi.stubEnv("AIRTABLE_TOKEN", "")
+    vi.stubEnv("AIRTABLE_BASE_ID", "")
+    for (const token of ["not-a-token", "", "a".repeat(42), "a".repeat(44), `${"a".repeat(42)}=`]) {
+      expect(await getGuarantorView(token)).toEqual({ screen: "invalid" })
+    }
+    expect(fake.calls).toHaveLength(0)
+    expect(logs).toEqual([])
+  })
+
   it("resolves a token and never logs it", async () => {
     await submitGuarantorRequest(input())
     const token = generateToken()

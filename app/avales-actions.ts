@@ -4,6 +4,7 @@ import { validateSecurityToken } from "@/lib/security-token"
 import { airtableFromEnv, AirtableError } from "@/lib/airtable"
 import { createAvalesRepo } from "@/lib/avales/repo"
 import { guarantorRequestSchema, toFieldErrors } from "@/lib/avales/schema"
+import { isWellFormedToken } from "@/lib/avales/tokens"
 import type {
   AnswerResult,
   GuarantorAnswer,
@@ -87,6 +88,8 @@ export async function submitGuarantorRequest(input: GuarantorRequestInput): Prom
  * Throws (without details) when storage is unavailable, so the route's error boundary handles it.
  */
 export async function getGuarantorView(token: string): Promise<GuarantorView> {
+  // A malformed token is `invalid` without touching storage (nor needing it configured).
+  if (!isWellFormedToken(token)) return { screen: "invalid" }
   const repo = repoFromEnv()
   if (!repo) throw new Error("Guarantor view unavailable")
   try {

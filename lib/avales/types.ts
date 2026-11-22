@@ -95,6 +95,11 @@ export type SubmitResult =
       expiresAt: string
       /** Requested amount as stored (the original one when `reused`). */
       requestedAmount: number
+      /**
+       * true while the request still accepts answers (`pending_guarantors` and not past `expiresAt`).
+       * false only on a retry over a request that expired or was already resolved: do not show "En revisión".
+       */
+      open: boolean
       /** true when a request with the same `authorization` already existed and was returned as is. */
       reused: boolean
     }
