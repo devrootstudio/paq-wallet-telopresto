@@ -1,11 +1,11 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { answerGuarantor } from "@/app/avales-actions"
 import { guarantorAnswerSchema, toFieldErrors } from "@/lib/avales/schema"
 import type { AnswerResult, FieldErrors, GuarantorAnswer, GuarantorAnswerInput } from "@/lib/avales/types"
 import { cn } from "@/lib/utils"
-import { formatDPI, formatPhone, onlyDigits, phoneDigits } from "./format"
+import { formatDPI, formatPhone, withoutCountryCode } from "./format"
 
 /** What the form shows after the guarantor presses Avalar or confirms Rechazar. */
 export interface AnswerOutcome {
@@ -81,24 +81,45 @@ const inputClass = (hasError: boolean) =>
     hasError && "border-red-500 focus-visible:ring-red-500",
   )
 
-function FieldError({ message }: { message?: string }) {
+function FieldError({ id, message }: { id: string; message?: string }) {
   if (!message) return null
-  return <p className="mt-1 ml-1 text-xs font-semibold text-red-300">{message}</p>
+  return (
+    <p id={id} className="mt-1 ml-1 text-xs font-semibold text-red-300">
+      {message}
+    </p>
+  )
 }
 
 export default function AvalForm({ token, applicantFirstName, guarantor, initialMode = "form" }: AvalFormProps) {
-  // The guarantor's own DPI and phone are rendered only in the two inputs below (formatDPI/formatPhone):
-  // masking them later is a change in this component alone.
+  // The guarantor's own DPI and phone are rendered only in the two inputs below (initial value here):
+  // masking them later is a change in this component alone. The inputs keep what the person types
+  // (spaces and dashes included) so the cursor never jumps; the shared schema strips separators.
   const [data, setData] = useState<GuarantorAnswerInput>({
     fullName: guarantor.fullName,
-    identification: onlyDigits(guarantor.identification),
-    phone: phoneDigits(guarantor.phone),
+    identification: formatDPI(guarantor.identification),
+    phone: formatPhone(guarantor.phone),
   })
   const [accepted, setAccepted] = useState(false)
   const [mode, setMode] = useState<"form" | "confirm-reject">(initialMode)
   const [outcome, setOutcome] = useState<AnswerOutcome>({ fieldErrors: {}, message: null })
   const [sending, setSending] = useState(false)
   const inFlight = useRef(false)
+  const rejectButton = useRef<HTMLButtonElement>(null)
+  const rejectDialog = useRef<HTMLElement>(null)
+  const switchedMode = useRef(false)
+
+  // Keyboard and screen-reader users land on the warning when it opens, and back on Rechazar after Volver.
+  useEffect(() => {
+    if (!switchedMode.current) return
+    if (mode === "confirm-reject") rejectDialog.current?.focus()
+    else rejectButton.current?.focus()
+  }, [mode])
+
+  const changeMode = (next: "form" | "confirm-reject") => {
+    switchedMode.current = true
+    setOutcome({ fieldErrors: {}, message: null })
+    setMode(next)
+  }
 
   const set = (field: keyof GuarantorAnswerInput, value: string) => setData((prev) => ({ ...prev, [field]: value }))
 
@@ -107,7 +128,12 @@ export default function AvalForm({ token, applicantFirstName, guarantor, initial
     inFlight.current = true
     setSending(true)
     try {
-      setOutcome(await submitAnswer(token, answer, data))
+      // The contract ignores the data on reject: do not send it.
+      const payload =
+        answer === "reject"
+          ? { fullName: "", identification: "", phone: "" }
+          : { ...data, phone: withoutCountryCode(data.phone) }
+      setOutcome(await submitAnswer(token, answer, payload))
     } finally {
       inFlight.current = false
       setSending(false)
@@ -150,11 +176,12 @@ export default function AvalForm({ token, applicantFirstName, guarantor, initial
             onChange={(e) => set("fullName", e.target.value)}
             disabled={sending || mode === "confirm-reject"}
             aria-invalid={!!errors.fullName}
+            aria-describedby={errors.fullName ? "aval-fullName-error" : undefined}
             className={inputClass(!!errors.fullName)}
           />
-          <FieldError message={errors.fullName} />
+          <FieldError id="aval-fullName-error" message={errors.fullName} />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">
           <div>
             <label htmlFor="aval-identification" className="block text-xs font-medium text-white mb-1 ml-1">
               DPI
@@ -163,13 +190,15 @@ export default function AvalForm({ token, applicantFirstName, guarantor, initial
               id="aval-identification"
               inputMode="numeric"
               autoComplete="off"
-              value={formatDPI(data.identification)}
-              onChange={(e) => set("identification", onlyDigits(e.target.value).slice(0, 13))}
+              maxLength={20}
+              value={data.identification}
+              onChange={(e) => set("identification", e.target.value)}
               disabled={sending || mode === "confirm-reject"}
               aria-invalid={!!errors.identification}
+              aria-describedby={errors.identification ? "aval-identification-error" : undefined}
               className={inputClass(!!errors.identification)}
             />
-            <FieldError message={errors.identification} />
+            <FieldError id="aval-identification-error" message={errors.identification} />
           </div>
           <div>
             <label htmlFor="aval-phone" className="block text-xs font-medium text-white mb-1 ml-1">
@@ -180,13 +209,15 @@ export default function AvalForm({ token, applicantFirstName, guarantor, initial
               type="tel"
               inputMode="numeric"
               autoComplete="tel-national"
-              value={formatPhone(data.phone)}
-              onChange={(e) => set("phone", phoneDigits(e.target.value))}
+              maxLength={20}
+              value={data.phone}
+              onChange={(e) => set("phone", e.target.value)}
               disabled={sending || mode === "confirm-reject"}
               aria-invalid={!!errors.phone}
+              aria-describedby={errors.phone ? "aval-phone-error" : undefined}
               className={inputClass(!!errors.phone)}
             />
-            <FieldError message={errors.phone} />
+            <FieldError id="aval-phone-error" message={errors.phone} />
           </div>
         </div>
       </section>
@@ -219,11 +250,9 @@ export default function AvalForm({ token, applicantFirstName, guarantor, initial
             {sending ? "Enviando..." : "Avalar"}
           </button>
           <button
+            ref={rejectButton}
             type="button"
-            onClick={() => {
-              setOutcome({ fieldErrors: {}, message: null })
-              setMode("confirm-reject")
-            }}
+            onClick={() => changeMode("confirm-reject")}
             disabled={sending}
             className="h-12 w-full rounded-full border-[1.5px] border-white/50 text-sm font-bold uppercase tracking-wide text-white disabled:opacity-60"
           >
@@ -231,11 +260,18 @@ export default function AvalForm({ token, applicantFirstName, guarantor, initial
           </button>
         </>
       ) : (
-        <section role="alertdialog" aria-labelledby="aval-rechazo" className="rounded-2xl bg-white p-5 text-paq-green">
+        <section
+          ref={rejectDialog}
+          tabIndex={-1}
+          role="alertdialog"
+          aria-labelledby="aval-rechazo"
+          aria-describedby="aval-rechazo-detalle"
+          className="rounded-2xl bg-white p-5 text-paq-green outline-none focus-visible:ring-2 focus-visible:ring-paq-yellow"
+        >
           <h2 id="aval-rechazo" className="mb-2 text-base font-bold">
             ¿Seguro que quieres rechazar?
           </h2>
-          <ul className="mb-4 list-disc space-y-1 pl-5 text-sm leading-relaxed">
+          <ul id="aval-rechazo-detalle" className="mb-4 list-disc space-y-1 pl-5 text-sm leading-relaxed">
             <li>{applicantFirstName} no contará con tu aval para su adelanto.</li>
             <li>Si 2 de sus 3 referencias rechazan, su solicitud se cancela.</li>
             <li>Ya no podrás cambiar tu respuesta.</li>
@@ -250,10 +286,7 @@ export default function AvalForm({ token, applicantFirstName, guarantor, initial
           </button>
           <button
             type="button"
-            onClick={() => {
-              setOutcome({ fieldErrors: {}, message: null })
-              setMode("form")
-            }}
+            onClick={() => changeMode("form")}
             disabled={sending}
             className="h-12 w-full rounded-full border-[1.5px] border-paq-green/40 text-sm font-bold uppercase tracking-wide text-paq-green disabled:opacity-60"
           >

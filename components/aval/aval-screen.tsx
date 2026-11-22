@@ -25,7 +25,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 }
 
 function RequestCard({ base, children }: { base: GuarantorViewBase; children: React.ReactNode }) {
-  const initial = base.applicantFirstName.trim().charAt(0).toUpperCase() || "?"
+  const initial = firstName(base.applicantFirstName).charAt(0).toUpperCase() || "?"
   return (
     <section className="mb-6 rounded-3xl bg-paq-yellow px-5 py-6 text-center text-paq-green">
       <div
@@ -42,10 +42,11 @@ function RequestCard({ base, children }: { base: GuarantorViewBase; children: Re
   )
 }
 
-function Message({ title, children }: { title: string; children: React.ReactNode }) {
+function Message({ title, children, level = 2 }: { title: string; children: React.ReactNode; level?: 1 | 2 }) {
+  const Heading = level === 1 ? "h1" : "h2"
   return (
     <section className="rounded-2xl border border-white/20 bg-white/5 p-5 text-center">
-      <h2 className="mb-2 text-lg font-bold">{title}</h2>
+      <Heading className="mb-2 text-lg font-bold">{title}</Heading>
       <div className="text-sm leading-relaxed text-white/80">{children}</div>
     </section>
   )
@@ -55,14 +56,15 @@ export default function AvalScreen({ view, token, now = Date.now(), initialMode 
   if (view.screen === "invalid") {
     return (
       <Shell>
-        <Message title="Este link no es válido">
+        <Message title="Este link no es válido" level={1}>
           <p>Revisa que hayas abierto el link completo que te llegó por WhatsApp.</p>
         </Message>
       </Shell>
     )
   }
 
-  const name = view.applicantFirstName
+  // Defensive: only the first name is ever shown, even if more arrives.
+  const name = firstName(view.applicantFirstName)
   const timeLeft = formatTimeLeft(view.expiresAt, now)
 
   if (view.screen === "form") {
@@ -85,21 +87,28 @@ export default function AvalScreen({ view, token, now = Date.now(), initialMode 
         <AvalForm
           token={token}
           applicantFirstName={name}
-          guarantor={view.guarantor}
+          // Only the three fields the guarantor confirms cross into the client bundle.
+          guarantor={{
+            fullName: view.guarantor.fullName,
+            identification: view.guarantor.identification,
+            phone: view.guarantor.phone,
+          }}
           initialMode={initialMode}
         />
 
-        {timeLeft && (
-          <p className="mt-4 text-center text-xs leading-relaxed text-white/60">
-            Esta solicitud vence en{" "}
-            <b className="text-white/90">
-              <TimeLeft expiresAt={view.expiresAt} now={now} />
-            </b>
-            .
-            <br />
-            Si no reconoces a {name}, presiona <b className="text-white/90">Rechazar</b>.
-          </p>
-        )}
+        <p className="mt-4 text-center text-xs leading-relaxed text-white/60">
+          {timeLeft && (
+            <>
+              Esta solicitud vence en{" "}
+              <b className="text-white/90">
+                <TimeLeft expiresAt={view.expiresAt} now={now} />
+              </b>
+              .
+              <br />
+            </>
+          )}
+          Si no reconoces a {name}, presiona <b className="text-white/90">Rechazar</b>.
+        </p>
       </Shell>
     )
   }

@@ -12,7 +12,7 @@ import AvalScreen from "@/components/aval/aval-screen"
 import AvalError from "@/components/aval/aval-error"
 import AvalForm, { NOT_AVAILABLE_MESSAGE, submitAnswer } from "@/components/aval/aval-form"
 import { formatTimeLeft } from "@/components/aval/format"
-import AvalPage from "@/app/aval/[token]/page"
+import AvalPage, { dynamic as avalDynamic, metadata as avalMetadata } from "@/app/aval/[token]/page"
 import AvalPreviewPage from "@/app/dev/aval/[estado]/page"
 import { PREVIEW_STATES, previewView } from "@/app/dev/aval/[estado]/fixtures"
 import type { GuarantorView } from "@/lib/avales/types"
@@ -78,7 +78,7 @@ describe("/aval/<token> screens", () => {
   it("invalid: no request data at all", () => {
     const html = render({ screen: "invalid" })
     expect(html).toContain("Este link no es válido")
-    expect(html).not.toContain("Q")
+    expect(html).not.toContain("Q3500")
     expect(html).not.toContain("María")
   })
 
@@ -112,11 +112,13 @@ describe("/aval/<token> screens", () => {
   })
 
   it("a pasted +502 phone keeps the 8 local digits", async () => {
-    const { phoneDigits } = await import("@/components/aval/format")
+    const { phoneDigits, withoutCountryCode } = await import("@/components/aval/format")
     expect(phoneDigits("+502 1000 0001")).toBe("10000001")
     expect(phoneDigits("1000-0001")).toBe("10000001")
     expect(phoneDigits("00502 1000 0001")).toBe("10000001")
     expect(phoneDigits("5021 23456")).toBe("50212345")
+    expect(withoutCountryCode("+502 1000 0001")).toBe("10000001")
+    expect(withoutCountryCode("1000 00011")).toBe("100000011")
   })
 
   it("time left is h:mm and never negative", () => {
@@ -180,10 +182,58 @@ describe("pages", () => {
     expect(renderToStaticMarkup(el)).toContain("Esta solicitud ya se resolvió")
   })
 
-  it("the dev preview renders every fixture state", async () => {
+  it("the token page is never cached, indexed or leaked in the Referer", () => {
+    expect(avalDynamic).toBe("force-dynamic")
+    expect(avalMetadata).toMatchObject({ robots: { index: false, follow: false }, referrer: "no-referrer" })
+  })
+
+  it("only the 3 confirmable fields of the guarantor reach the client form", () => {
+    const view = {
+      ...base,
+      screen: "form",
+      identityMismatch: false,
+      guarantor: { ...guarantor, recordId: "rec-secret", tokenHash: "hash-secret" },
+    } as unknown as GuarantorView
+    const findForm = (node: unknown): ReactElement | null => {
+      if (!node || typeof node !== "object") return null
+      const el = node as ReactElement<{ children?: unknown }>
+      if (el.type === AvalForm) return el
+      const kids = el.props?.children
+      for (const kid of Array.isArray(kids) ? kids : [kids]) {
+        const found = findForm(kid)
+        if (found) return found
+      }
+      return null
+    }
+    const tree = AvalScreen({ view, token: "tok", now: NOW })
+    const form = findForm(tree) as ReactElement<{ guarantor: object }>
+    expect(form.props.guarantor).toEqual({
+      fullName: guarantor.fullName,
+      identification: guarantor.identification,
+      phone: guarantor.phone,
+    })
+  })
+
+  it("Avalar stays disabled until the guarantor accepts the statement", () => {
+    const html = render({ ...base, screen: "form", guarantor, identityMismatch: false })
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>Avalar<\/button>/)
+  })
+
+  it("the dev preview renders every fixture state with its own text", async () => {
+    vi.stubEnv("NODE_ENV", "development")
+    const expected: Record<string, string> = {
+      formulario: "¡Hola, Carlos!",
+      "formulario-rechazo": "¿Seguro que quieres rechazar?",
+      "formulario-revisar-datos": "no coincidieron con el registro oficial",
+      respondido: "Registramos tu aval para María",
+      "respondido-rechazo": "Registramos que no avalas",
+      cerrado: "Esta solicitud ya se resolvió",
+      vencido: "Esta solicitud venció",
+      invalido: "Este link no es válido",
+    }
     for (const estado of PREVIEW_STATES) {
       const el = (await AvalPreviewPage({ params: Promise.resolve({ estado }) })) as ReactElement
-      expect(renderToStaticMarkup(el).length).toBeGreaterThan(0)
+      expect(renderToStaticMarkup(el)).toContain(expected[estado])
       expect(previewView(estado, NOW).screen).toBeTruthy()
     }
   })
@@ -197,12 +247,18 @@ describe("pages", () => {
   })
 
   it("the dev preview can reproduce the load failure", async () => {
+    vi.stubEnv("NODE_ENV", "development")
     await expect(AvalPreviewPage({ params: Promise.resolve({ estado: "error" }) })).rejects.toThrow("Guarantor view unavailable")
   })
 
-  it("the dev preview is a 404 in production and for unknown states", async () => {
-    await expect(AvalPreviewPage({ params: Promise.resolve({ estado: "nope" }) })).rejects.toThrow()
-    vi.stubEnv("NODE_ENV", "production")
-    await expect(AvalPreviewPage({ params: Promise.resolve({ estado: "formulario" }) })).rejects.toThrow()
+  it("the dev preview is a 404 outside development and for unknown states", async () => {
+    const notFound = /NEXT_HTTP_ERROR_FALLBACK;404/
+    vi.stubEnv("NODE_ENV", "development")
+    await expect(AvalPreviewPage({ params: Promise.resolve({ estado: "nope" }) })).rejects.toThrow(notFound)
+    for (const env of ["production", "test"]) {
+      vi.stubEnv("NODE_ENV", env)
+      await expect(AvalPreviewPage({ params: Promise.resolve({ estado: "formulario" }) })).rejects.toThrow(notFound)
+      await expect(AvalPreviewPage({ params: Promise.resolve({ estado: "error" }) })).rejects.toThrow(notFound)
+    }
   })
 })

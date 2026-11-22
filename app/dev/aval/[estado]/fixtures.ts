@@ -4,7 +4,7 @@ import type { GuarantorView } from "@/lib/avales/types"
 const base = (now: number) => ({
   applicantFirstName: "María",
   amount: 3500,
-  // 47:52 h left, like the prototype
+  // 47:52 h left
   expiresAt: new Date(now + (47 * 60 + 52) * 60_000 + 30_000).toISOString(),
 })
 

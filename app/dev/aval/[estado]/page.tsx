@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic"
 export const metadata = { robots: { index: false, follow: false } }
 
 export default async function AvalPreviewPage({ params }: { params: Promise<{ estado: string }> }) {
-  if (process.env.NODE_ENV === "production") notFound()
+  if (process.env.NODE_ENV !== "development") notFound()
   const { estado } = await params
   // Same failure as getGuarantorView when storage is down: rendered by error.tsx.
   if (estado === "error") throw new Error("Guarantor view unavailable")

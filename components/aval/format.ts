@@ -37,12 +37,14 @@ export const onlyDigits = digits
  * Phone digits as typed or pasted. A Guatemala code is dropped only when it is clearly a prefix:
  * "+502 …", "00502 …" or 11 digits starting with 502 ("+502 5512 3478" → "55123478").
  */
-export const phoneDigits = (value: string) => {
+export const phoneDigits = (value: string) => withoutCountryCode(value).slice(0, 8)
+
+/** Same as `phoneDigits` but never truncates: extra digits stay so validation can report them. */
+export const withoutCountryCode = (value: string) => {
   const trimmed = value.trim()
   const d = digits(value)
-  let local = d
-  if (trimmed.startsWith("+502")) local = d.slice(3)
-  else if (d.startsWith("00502")) local = d.slice(5)
-  else if (d.length === 11 && d.startsWith("502")) local = d.slice(3)
-  return local.slice(0, 8)
+  if (trimmed.startsWith("+502")) return d.slice(3)
+  if (d.startsWith("00502")) return d.slice(5)
+  if (d.length === 11 && d.startsWith("502")) return d.slice(3)
+  return d
 }
