@@ -2,10 +2,46 @@
 
 import { useWizardStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Input } from "@/components/ui/input"
 import { ErrorTooltip } from "./step-1-form" // importing ErrorTooltip
 import { submitStep3Form } from "@/app/actions"
+import { getRutaAction } from "@/app/avales-actions"
+import type { Ruta } from "@/lib/avales/types"
+import type { WizardState } from "@/lib/store"
+
+/**
+ * Asks the server for TELOPRESTO_RUTA. If the call fails, falls back to `aval` (the contract default,
+ * which never disburses from the browser). Returns a cancel function for the effect cleanup.
+ */
+export function loadRuta(setRuta: (ruta: Ruta) => void, get: () => Promise<Ruta> = getRutaAction): () => void {
+  let cancelled = false
+  get()
+    .then((value) => {
+      if (!cancelled) setRuta(value)
+    })
+    .catch(() => {
+      if (!cancelled) setRuta("aval")
+    })
+  return () => {
+    cancelled = true
+  }
+}
+
+/**
+ * Aval route: "Solicitar aval" opens Step 3b. Never disburses. Returns the error to show, or null.
+ */
+export function openGuarantorsForm(
+  formData: WizardState["formData"],
+  setAvalStage: WizardState["setAvalStage"],
+): string | null {
+  if (!formData.phone || !formData.idSolicitud || !formData.requestedAmount || formData.requestedAmount <= 0) {
+    return "Faltan datos necesarios para procesar la solicitud"
+  }
+  if (!formData.autorizacion) return "Error: número de autorización no encontrado"
+  setAvalStage("avales")
+  return null
+}
 
 // Helper function to calculate commission
 const calculateCommission = (requestedAmount: number): number => {
@@ -47,12 +83,24 @@ const calculateDisbursementAmount = (requestedAmount: number): number => {
 }
 
 export default function Step3Approval() {
-  const { nextStepAsync, formData, updateFormData, setLoading, setErrorStep, isLoading } = useWizardStore()
+  const { nextStepAsync, formData, updateFormData, setLoading, setErrorStep, isLoading, ruta, setRuta, setAvalStage } =
+    useWizardStore()
   const [isEditing, setIsEditing] = useState(false)
   const [editAmount, setEditAmount] = useState("")
   const [error, setError] = useState<string | null>(null) // state for validation error
 
   const APPROVED_AMOUNT = formData.approvedAmount || 0 // Get approved amount from store
+
+  // TELOPRESTO_RUTA decides the flow. Until the server answers, the screen stays neutral.
+  useEffect(() => {
+    if (ruta !== null) return
+    return loadRuta(setRuta)
+  }, [ruta, setRuta])
+
+  const isAvalRoute = ruta === "aval"
+  const isNormalRoute = ruta === "normal"
+
+  const handleRequestGuarantors = () => setError(openGuarantorsForm(formData, setAvalStage))
 
   const handleRequestDisbursement = async () => {
     // Validate required data
@@ -222,24 +270,50 @@ export default function Step3Approval() {
                   • El adelanto se debitará en tu próxima nómina
                 </p>
               </div>
-              {!isEditing && (
+              {!isEditing && isNormalRoute && (
                 <p className="text-xs text-paq-green/70 text-left leading-relaxed italic mt-2">
                   • <span className="font-semibold">Importante:</span> Al presionar <span className="font-semibold">"Solicítalo ahora"</span> se depositará automáticamente el adelanto solicitado.
                 </p>
               )}
+              {!isEditing && isAvalRoute && (
+                <p className="text-xs text-paq-green/70 text-left leading-relaxed italic mt-2">
+                  • <span className="font-semibold">Importante:</span> Al presionar <span className="font-semibold">"Solicitar aval"</span> ingresarás 3 referencias personales. El depósito se realiza cuando al menos 2 de ellas avalen tu solicitud.
+                </p>
+              )}
         </div>
+
+        {!isEditing && isAvalRoute && error && (
+          <p role="alert" className="w-full px-4 mb-2 text-xs font-semibold text-red-700 text-left">
+            {error}
+          </p>
+        )}
 
         <div className="flex flex-col gap-3 w-full mt-2">
           {!isEditing ? (
             <>
-              <Button
-                onClick={handleRequestDisbursement}
-                variant="paqDark"
-                className="rounded-full w-full text-sm h-12"
-                disabled={isLoading}
-              >
-                {isLoading ? "PROCESANDO..." : "Solicítalo ahora"}
-              </Button>
+              {ruta === null ? (
+                <Button variant="paqDark" className="rounded-full w-full text-sm h-12" disabled>
+                  Cargando...
+                </Button>
+              ) : isAvalRoute ? (
+                <Button
+                  onClick={handleRequestGuarantors}
+                  variant="paqDark"
+                  className="rounded-full w-full text-sm h-12"
+                  disabled={isLoading}
+                >
+                  Solicitar aval
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleRequestDisbursement}
+                  variant="paqDark"
+                  className="rounded-full w-full text-sm h-12"
+                  disabled={isLoading}
+                >
+                  {isLoading ? "PROCESANDO..." : "Solicítalo ahora"}
+                </Button>
+              )}
 
               <Button
                 onClick={handleEditClick}

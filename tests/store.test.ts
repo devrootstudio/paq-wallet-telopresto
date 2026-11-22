@@ -75,3 +75,35 @@ describe("error routing (store.setErrorStep)", () => {
     expect(s()).toMatchObject({ step: 5, errorFromStep: 3 })
   })
 })
+
+describe("aval route state (store)", () => {
+  it("starts with no route, no aval stage and no request", () => {
+    expect(s()).toMatchObject({ ruta: null, avalStage: null, guarantorRequest: null })
+  })
+
+  it("keeps the route, the stage and the saved request", () => {
+    s().setRuta("aval")
+    s().setAvalStage("avales")
+    expect(s()).toMatchObject({ ruta: "aval", avalStage: "avales" })
+    s().setGuarantorRequest({ amount: 2500, expiresAt: "2026-11-24T12:00:00.000Z", reused: false, open: true })
+    s().setAvalStage("en-revision")
+    expect(s()).toMatchObject({
+      avalStage: "en-revision",
+      guarantorRequest: { amount: 2500, expiresAt: "2026-11-24T12:00:00.000Z", reused: false, open: true },
+    })
+  })
+
+  it("reset clears the aval route state", () => {
+    s().setRuta("normal")
+    s().setAvalStage("en-revision")
+    s().setGuarantorRequest({ amount: 1, expiresAt: "x", reused: false, open: true })
+    s().reset()
+    expect(s()).toMatchObject({ ruta: null, avalStage: null, guarantorRequest: null })
+  })
+
+  it("the aval stage does not change the step", () => {
+    useWizardStore.setState({ step: 3 })
+    s().setAvalStage("avales")
+    expect(s().step).toBe(3)
+  })
+})
