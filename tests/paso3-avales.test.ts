@@ -183,6 +183,11 @@ describe("Paso 3b form", () => {
     expect(formatPhone("10000001")).toBe("1000 0001")
     expect(phoneDigits("+502 1000 0001")).toBe("10000001")
     expect(phoneDigits("1000 0001")).toBe("10000001")
+    expect(phoneDigits("00502 1000 0001")).toBe("10000001")
+    expect(phoneDigits("50210000001")).toBe("10000001")
+    // A local number that starts with 502 is kept, even with an extra digit typed
+    expect(phoneDigits("5021 2345")).toBe("50212345")
+    expect(phoneDigits("5021 23456")).toBe("50212345")
   })
 
   it("cupoId is sent as text even if valida_cupo returned a number; commission is rounded", () => {

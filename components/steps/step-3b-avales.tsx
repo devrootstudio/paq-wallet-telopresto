@@ -55,10 +55,18 @@ export const formatPhone = (value: string) => {
   return [d.slice(0, 4), d.slice(4)].filter(Boolean).join(" ")
 }
 
-/** Phone digits as typed or pasted: drops a leading Guatemala code ("+502 5512 3478" → "55123478"). */
+/**
+ * Phone digits as typed or pasted. A Guatemala code is dropped only when it is clearly a prefix:
+ * "+502 …", "00502 …" or 11 digits starting with 502 ("+502 5512 3478" → "55123478").
+ */
 export const phoneDigits = (value: string) => {
+  const trimmed = value.trim()
   const d = digits(value)
-  return (d.length > 8 && d.startsWith("502") ? d.slice(3) : d).slice(0, 8)
+  let local = d
+  if (trimmed.startsWith("+502")) local = d.slice(3)
+  else if (d.startsWith("00502")) local = d.slice(5)
+  else if (d.length === 11 && d.startsWith("502")) local = d.slice(3)
+  return local.slice(0, 8)
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100
@@ -181,7 +189,8 @@ export async function requestGuarantors(
       // The route changed to `normal` (or the first lookup failed): ask again and show today's Step 3.
       store.setAvalStage(null)
       store.setRuta(null)
-      return { sent: false, errors: {}, message: submitErrorMessage(result) }
+      // This screen unmounts: no message to show here.
+      return { sent: false, errors: {}, message: null }
     }
     const fromServer = result.fieldErrors ? splitFieldErrors(result.fieldErrors) : {}
     return { sent: false, errors: fromServer, message: fromServer.form ?? submitErrorMessage(result) }

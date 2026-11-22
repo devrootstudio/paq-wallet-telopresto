@@ -19,6 +19,7 @@ export function formatTimeLeft(expiresAt: string, now: number = Date.now()): str
  */
 export default function Step3cEnRevision() {
   const { guarantorRequest } = useWizardStore()
+  const reused = guarantorRequest?.reused ?? false
   const amount = guarantorRequest?.amount ?? null
   // Re-render every minute so the time left keeps moving while the screen is open.
   const [now, setNow] = useState(() => Date.now())
@@ -35,15 +36,15 @@ export default function Step3cEnRevision() {
           En revisión
         </span>
         <h2 className="text-2xl font-bold text-paq-green leading-tight mb-3">Enviamos tu solicitud a tus avales</h2>
-        {amount !== null ? (
+        {!reused && amount !== null ? (
           <p className="text-sm text-paq-green/90 leading-relaxed">
             Tu adelanto de <span className="font-bold">Q{amount.toFixed(2)}</span> está reservado.
           </p>
-        ) : (
+        ) : reused ? (
           <p className="text-sm text-paq-green/90 leading-relaxed">
             Ya habíamos recibido tu solicitud: sigue en revisión con los datos que enviaste la primera vez.
           </p>
-        )}
+        ) : null}
 
         <div className="w-full mt-6 rounded-2xl bg-paq-green/10 p-4 text-left space-y-3">
           <div className="flex items-start gap-3">
