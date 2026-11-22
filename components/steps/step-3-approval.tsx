@@ -7,6 +7,41 @@ import { Input } from "@/components/ui/input"
 import { ErrorTooltip } from "./step-1-form" // importing ErrorTooltip
 import { submitStep3Form } from "@/app/actions"
 import { getRutaAction } from "@/app/avales-actions"
+import type { Ruta } from "@/lib/avales/types"
+import type { WizardState } from "@/lib/store"
+
+/**
+ * Asks the server for TELOPRESTO_RUTA. If the call fails, falls back to `aval` (the contract default,
+ * which never disburses from the browser). Returns a cancel function for the effect cleanup.
+ */
+export function loadRuta(setRuta: (ruta: Ruta) => void, get: () => Promise<Ruta> = getRutaAction): () => void {
+  let cancelled = false
+  get()
+    .then((value) => {
+      if (!cancelled) setRuta(value)
+    })
+    .catch(() => {
+      if (!cancelled) setRuta("aval")
+    })
+  return () => {
+    cancelled = true
+  }
+}
+
+/**
+ * Aval route: "Solicitar aval" opens Step 3b. Never disburses. Returns the error to show, or null.
+ */
+export function openGuarantorsForm(
+  formData: WizardState["formData"],
+  setAvalStage: WizardState["setAvalStage"],
+): string | null {
+  if (!formData.phone || !formData.idSolicitud || !formData.requestedAmount || formData.requestedAmount <= 0) {
+    return "Faltan datos necesarios para procesar la solicitud"
+  }
+  if (!formData.autorizacion) return "Error: número de autorización no encontrado"
+  setAvalStage("avales")
+  return null
+}
 
 // Helper function to calculate commission
 const calculateCommission = (requestedAmount: number): number => {
@@ -56,38 +91,16 @@ export default function Step3Approval() {
 
   const APPROVED_AMOUNT = formData.approvedAmount || 0 // Get approved amount from store
 
-  // TELOPRESTO_RUTA decides the flow. Until the server answers, the main button stays disabled.
+  // TELOPRESTO_RUTA decides the flow. Until the server answers, the screen stays neutral.
   useEffect(() => {
     if (ruta !== null) return
-    let cancelled = false
-    getRutaAction()
-      .then((value) => {
-        if (!cancelled) setRuta(value)
-      })
-      .catch(() => {
-        // The contract default is `aval`: it never disburses from the browser.
-        if (!cancelled) setRuta("aval")
-      })
-    return () => {
-      cancelled = true
-    }
+    return loadRuta(setRuta)
   }, [ruta, setRuta])
 
   const isAvalRoute = ruta === "aval"
+  const isNormalRoute = ruta === "normal"
 
-  // Aval route: no disbursement here. Open Step 3b (the guarantors form).
-  const handleRequestGuarantors = () => {
-    if (!formData.phone || !formData.idSolicitud || !formData.requestedAmount || formData.requestedAmount <= 0) {
-      setError("Faltan datos necesarios para procesar la solicitud")
-      return
-    }
-    if (!formData.autorizacion) {
-      setError("Error: número de autorización no encontrado")
-      return
-    }
-    setError(null)
-    setAvalStage("avales")
-  }
+  const handleRequestGuarantors = () => setError(openGuarantorsForm(formData, setAvalStage))
 
   const handleRequestDisbursement = async () => {
     // Validate required data
@@ -257,7 +270,7 @@ export default function Step3Approval() {
                   • El adelanto se debitará en tu próxima nómina
                 </p>
               </div>
-              {!isEditing && !isAvalRoute && (
+              {!isEditing && isNormalRoute && (
                 <p className="text-xs text-paq-green/70 text-left leading-relaxed italic mt-2">
                   • <span className="font-semibold">Importante:</span> Al presionar <span className="font-semibold">"Solicítalo ahora"</span> se depositará automáticamente el adelanto solicitado.
                 </p>
@@ -278,7 +291,11 @@ export default function Step3Approval() {
         <div className="flex flex-col gap-3 w-full mt-2">
           {!isEditing ? (
             <>
-              {isAvalRoute ? (
+              {ruta === null ? (
+                <Button variant="paqDark" className="rounded-full w-full text-sm h-12" disabled>
+                  Cargando...
+                </Button>
+              ) : isAvalRoute ? (
                 <Button
                   onClick={handleRequestGuarantors}
                   variant="paqDark"
@@ -292,7 +309,7 @@ export default function Step3Approval() {
                   onClick={handleRequestDisbursement}
                   variant="paqDark"
                   className="rounded-full w-full text-sm h-12"
-                  disabled={isLoading || ruta === null}
+                  disabled={isLoading}
                 >
                   {isLoading ? "PROCESANDO..." : "Solicítalo ahora"}
                 </Button>

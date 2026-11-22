@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { useWizardStore } from "@/lib/store"
 
 /** Hours and minutes left until `expiresAt`, as "47:52 h". Never negative. */
@@ -17,9 +18,15 @@ export function formatTimeLeft(expiresAt: string, now: number = Date.now()): str
  * Nothing else happens on this screen: the person can close it and will hear back by WhatsApp.
  */
 export default function Step3cEnRevision() {
-  const { guarantorRequest, formData } = useWizardStore()
-  const amount = guarantorRequest?.amount ?? formData.requestedAmount ?? 0
-  const timeLeft = guarantorRequest ? formatTimeLeft(guarantorRequest.expiresAt) : null
+  const { guarantorRequest } = useWizardStore()
+  const amount = guarantorRequest?.amount ?? null
+  // Re-render every minute so the time left keeps moving while the screen is open.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(id)
+  }, [])
+  const timeLeft = guarantorRequest ? formatTimeLeft(guarantorRequest.expiresAt, now) : null
 
   return (
     <div className="w-full max-w-md mx-auto px-4 py-8 flex flex-col justify-center items-center min-h-[60vh] animate-in zoom-in-95 duration-500">
@@ -28,9 +35,15 @@ export default function Step3cEnRevision() {
           En revisión
         </span>
         <h2 className="text-2xl font-bold text-paq-green leading-tight mb-3">Enviamos tu solicitud a tus avales</h2>
-        <p className="text-sm text-paq-green/90 leading-relaxed">
-          Tu adelanto de <span className="font-bold">Q{amount.toFixed(2)}</span> está reservado.
-        </p>
+        {amount !== null ? (
+          <p className="text-sm text-paq-green/90 leading-relaxed">
+            Tu adelanto de <span className="font-bold">Q{amount.toFixed(2)}</span> está reservado.
+          </p>
+        ) : (
+          <p className="text-sm text-paq-green/90 leading-relaxed">
+            Ya habíamos recibido tu solicitud: sigue en revisión con los datos que enviaste la primera vez.
+          </p>
+        )}
 
         <div className="w-full mt-6 rounded-2xl bg-paq-green/10 p-4 text-left space-y-3">
           <div className="flex items-start gap-3">

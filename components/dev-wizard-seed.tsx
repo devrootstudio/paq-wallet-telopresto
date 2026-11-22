@@ -111,6 +111,7 @@ export function DevWizardSeed() {
         amount: useWizardStore.getState().formData.requestedAmount,
         // 47:52 h left, like the prototype
         expiresAt: new Date(Date.now() + (47 * 60 + 52) * 60_000 + 30_000).toISOString(),
+        reused: false,
       })
     }
 

@@ -20,13 +20,13 @@ const BASE = process.env.BASE_URL || "http://127.0.0.1:3000"
 
 /** Step 3b with the validation errors: one repeated phone and the rest empty, then submit. */
 async function showGuarantorErrors(page) {
-  await page.locator("#aval-0-fullName").fill("Carlos Andrés Pérez López")
-  await page.locator("#aval-0-identification").fill("2456789010101")
-  await page.locator("#aval-0-phone").fill("55123478")
+  await page.locator("#aval-0-fullName").fill("Aval Uno Prueba")
+  await page.locator("#aval-0-identification").fill("1000000000101")
+  await page.locator("#aval-0-phone").fill("10000001")
   await page.locator("#aval-0-relationship").selectOption("hermano/a")
-  await page.locator("#aval-1-fullName").fill("Ana Lucía Gómez Herrera")
-  await page.locator("#aval-1-identification").fill("30124567")
-  await page.locator("#aval-1-phone").fill("55123478")
+  await page.locator("#aval-1-fullName").fill("Aval Dos Prueba")
+  await page.locator("#aval-1-identification").fill("10000002")
+  await page.locator("#aval-1-phone").fill("10000001")
   await page.getByRole("button", { name: "Solicitar avales" }).click()
   await page.waitForTimeout(400)
 }

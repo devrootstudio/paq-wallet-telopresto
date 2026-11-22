@@ -85,18 +85,18 @@ describe("aval route state (store)", () => {
     s().setRuta("aval")
     s().setAvalStage("avales")
     expect(s()).toMatchObject({ ruta: "aval", avalStage: "avales" })
-    s().setGuarantorRequest({ amount: 2500, expiresAt: "2026-11-24T12:00:00.000Z" })
+    s().setGuarantorRequest({ amount: 2500, expiresAt: "2026-11-24T12:00:00.000Z", reused: false })
     s().setAvalStage("en-revision")
     expect(s()).toMatchObject({
       avalStage: "en-revision",
-      guarantorRequest: { amount: 2500, expiresAt: "2026-11-24T12:00:00.000Z" },
+      guarantorRequest: { amount: 2500, expiresAt: "2026-11-24T12:00:00.000Z", reused: false },
     })
   })
 
   it("reset clears the aval route state", () => {
     s().setRuta("normal")
     s().setAvalStage("en-revision")
-    s().setGuarantorRequest({ amount: 1, expiresAt: "x" })
+    s().setGuarantorRequest({ amount: 1, expiresAt: "x", reused: false })
     s().reset()
     expect(s()).toMatchObject({ ruta: null, avalStage: null, guarantorRequest: null })
   })

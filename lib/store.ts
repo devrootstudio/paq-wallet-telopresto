@@ -56,8 +56,11 @@ export type AvalStage = "avales" | "en-revision" | null
 
 /** What the "en revisión" screen needs once the request is saved. */
 export interface GuarantorRequestSummary {
-  amount: number
+  /** null when the server returned an existing request: the saved amount may differ from the one on screen. */
+  amount: number | null
   expiresAt: string
+  /** true when a request with the same authorization already existed (safe retry). */
+  reused: boolean
 }
 
 export interface WizardState {
@@ -70,7 +73,8 @@ export interface WizardState {
   ruta: Ruta | null
   avalStage: AvalStage
   guarantorRequest: GuarantorRequestSummary | null
-  setRuta: (ruta: Ruta) => void
+  /** `null` asks the server again (Step 3 reloads the route). */
+  setRuta: (ruta: Ruta | null) => void
   setAvalStage: (stage: AvalStage) => void
   setGuarantorRequest: (summary: GuarantorRequestSummary | null) => void
   setStep: (step: Step) => void

@@ -35,7 +35,8 @@ export type GuarantorErrors = FieldErrors
 
 const fieldKey = (index: number, field: GuarantorField) => `guarantors.${index}.${field}`
 
-const FORM_DATA_ERROR = "Faltan datos de tu solicitud. Vuelve al paso anterior e intenta de nuevo."
+const FORM_DATA_ERROR =
+  "Algunos datos de tu solicitud no son válidos. Recarga la página e inicia la solicitud de nuevo."
 
 export const emptyGuarantors = (): GuarantorDraft[] =>
   Array.from({ length: GUARANTOR_COUNT }, () => ({ fullName: "", identification: "", phone: "", relationship: "" }))
@@ -54,6 +55,14 @@ export const formatPhone = (value: string) => {
   return [d.slice(0, 4), d.slice(4)].filter(Boolean).join(" ")
 }
 
+/** Phone digits as typed or pasted: drops a leading Guatemala code ("+502 5512 3478" → "55123478"). */
+export const phoneDigits = (value: string) => {
+  const d = digits(value)
+  return (d.length > 8 && d.startsWith("502") ? d.slice(3) : d).slice(0, 8)
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100
+
 type Store = Pick<WizardState, "formData">
 
 /** Everything `submitGuarantorRequest` needs, from the wizard store plus the 3 guarantors. */
@@ -71,10 +80,11 @@ export function buildGuarantorRequest(formData: Store["formData"], guarantors: G
       maritalStatus: formData.estadoCivil,
       address: formData.domicilio,
     },
-    cupoId: formData.idSolicitud,
+    // valida_cupo may hand it over as a number: the contract stores text.
+    cupoId: String(formData.idSolicitud ?? ""),
     approvedAmount: formData.approvedAmount || 0,
     requestedAmount,
-    commission: Math.max(0, requestedAmount - (formData.disbursementAmount || 0)),
+    commission: round2(Math.max(0, requestedAmount - (formData.disbursementAmount || 0))),
     commissionPct: formData.comisionPorcentaje || 0,
     // An empty relationship is sent as is so the shared schema reports it ("Selecciona la relación").
     guarantors: guarantors.map(
@@ -149,7 +159,7 @@ export interface RequestOutcome {
 export async function requestGuarantors(
   formData: Store["formData"],
   guarantors: GuarantorDraft[],
-  store: Pick<WizardState, "setGuarantorRequest" | "setAvalStage">,
+  store: Pick<WizardState, "setGuarantorRequest" | "setAvalStage" | "setRuta">,
   send: typeof submitGuarantorRequest = submitGuarantorRequest,
 ): Promise<RequestOutcome> {
   const input = buildGuarantorRequest(formData, guarantors)
@@ -159,9 +169,19 @@ export async function requestGuarantors(
   try {
     const result = await send(input)
     if (result.ok) {
-      store.setGuarantorRequest({ amount: input.requestedAmount, expiresAt: result.expiresAt })
+      store.setGuarantorRequest({
+        amount: result.reused ? null : input.requestedAmount,
+        expiresAt: result.expiresAt,
+        reused: result.reused,
+      })
       store.setAvalStage("en-revision")
       return { sent: true, errors: {}, message: null }
+    }
+    if (result.code === "route_disabled") {
+      // The route changed to `normal` (or the first lookup failed): ask again and show today's Step 3.
+      store.setAvalStage(null)
+      store.setRuta(null)
+      return { sent: false, errors: {}, message: submitErrorMessage(result) }
     }
     const fromServer = result.fieldErrors ? splitFieldErrors(result.fieldErrors) : {}
     return { sent: false, errors: fromServer, message: fromServer.form ?? submitErrorMessage(result) }
@@ -175,7 +195,7 @@ export async function requestGuarantors(
 }
 
 export default function Step3bAvales() {
-  const { formData, setAvalStage, setGuarantorRequest } = useWizardStore()
+  const { formData, setAvalStage, setGuarantorRequest, setRuta } = useWizardStore()
   const [guarantors, setGuarantors] = useState<GuarantorDraft[]>(emptyGuarantors)
   const [errors, setErrors] = useState<GuarantorErrors>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -202,7 +222,7 @@ export default function Step3bAvales() {
     inFlight.current = true
     setSubmitting(true)
     try {
-      const outcome = await requestGuarantors(formData, guarantors, { setGuarantorRequest, setAvalStage })
+      const outcome = await requestGuarantors(formData, guarantors, { setGuarantorRequest, setAvalStage, setRuta })
       if (outcome.sent) return
       setErrors(outcome.errors)
       setSubmitError(outcome.message)
@@ -288,7 +308,6 @@ export default function Step3bAvales() {
                     inputMode="numeric"
                     autoComplete="off"
                     placeholder="0000 00000 0000"
-                    maxLength={15}
                     value={formatDPI(g.identification)}
                     onChange={(e) => setField(i, "identification", digits(e.target.value).slice(0, 13))}
                     aria-invalid={!!errors[`guarantors.${i}.identification`]}
@@ -309,9 +328,8 @@ export default function Step3bAvales() {
                     inputMode="numeric"
                     autoComplete="off"
                     placeholder="0000 0000"
-                    maxLength={9}
                     value={formatPhone(g.phone)}
-                    onChange={(e) => setField(i, "phone", digits(e.target.value).slice(0, 8))}
+                    onChange={(e) => setField(i, "phone", phoneDigits(e.target.value))}
                     aria-invalid={!!errors[`guarantors.${i}.phone`]}
                     className={inputClass(!!errors[`guarantors.${i}.phone`])}
                   />
