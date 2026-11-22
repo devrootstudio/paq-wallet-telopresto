@@ -9,6 +9,7 @@ vi.mock("@/app/avales-actions", () => ({
 
 import { answerGuarantor, getGuarantorView } from "@/app/avales-actions"
 import AvalScreen from "@/components/aval/aval-screen"
+import AvalError from "@/components/aval/aval-error"
 import AvalForm, { NOT_AVAILABLE_MESSAGE, submitAnswer } from "@/components/aval/aval-form"
 import { formatTimeLeft } from "@/components/aval/format"
 import AvalPage from "@/app/aval/[token]/page"
@@ -183,6 +184,18 @@ describe("pages", () => {
       expect(renderToStaticMarkup(el).length).toBeGreaterThan(0)
       expect(previewView(estado, NOW).screen).toBeTruthy()
     }
+  })
+
+  it("a failed load shows a friendly retry screen without the error details", () => {
+    // error.tsx renders this component with a retry and never passes the error on.
+    const html = renderToStaticMarkup(createElement(AvalError, { reset: () => {} }))
+    expect(html).toContain("No pudimos cargar tu solicitud")
+    expect(html).toContain("Intentar de nuevo")
+    expect(html).not.toContain("Guarantor view unavailable")
+  })
+
+  it("the dev preview can reproduce the load failure", async () => {
+    await expect(AvalPreviewPage({ params: Promise.resolve({ estado: "error" }) })).rejects.toThrow("Guarantor view unavailable")
   })
 
   it("the dev preview is a 404 in production and for unknown states", async () => {

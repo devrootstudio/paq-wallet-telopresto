@@ -87,6 +87,8 @@ function FieldError({ message }: { message?: string }) {
 }
 
 export default function AvalForm({ token, applicantFirstName, guarantor, initialMode = "form" }: AvalFormProps) {
+  // The guarantor's own DPI and phone are rendered only in the two inputs below (formatDPI/formatPhone):
+  // masking them later is a change in this component alone.
   const [data, setData] = useState<GuarantorAnswerInput>({
     fullName: guarantor.fullName,
     identification: onlyDigits(guarantor.identification),
