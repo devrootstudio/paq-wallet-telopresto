@@ -47,31 +47,58 @@ const MESSAGES = {
   dpiIsApplicant: "El DPI del aval no puede ser el tuyo",
 } as const
 
+/** Normalized value if it is a well-formed phone/DPI, otherwise undefined (its own field error covers it). */
+function normalized(value: unknown, digits: number): string | undefined {
+  if (typeof value !== "string") return undefined
+  const clean = stripSeparators(value)
+  return new RegExp(`^\\d{${digits}}$`).test(clean) ? clean : undefined
+}
+
+function field(value: unknown, key: string): unknown {
+  return value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined
+}
+
 /**
  * Cross-checks between guarantors: no phone or DPI repeated among them, nor equal to the applicant's.
- * Every offending field gets its own error, so the form can mark each one.
+ * Runs on the raw input (normalized), so it reports even while other fields are still invalid; only
+ * well-formed values take part. Every offending field gets its own error.
  */
-function checkGuarantors(
-  guarantors: { phone: string; identification: string }[],
-  applicant: { phone: string; identification: string },
-  ctx: z.RefinementCtx,
-  prefix: (string | number)[],
-) {
-  const applicantPhone = stripSeparators(applicant.phone)
-  const applicantDpi = stripSeparators(applicant.identification)
-  guarantors.forEach((g, i) => {
-    const others = guarantors.filter((_, j) => j !== i)
-    if (g.phone === applicantPhone) {
+function checkGuarantorsRaw(rawGuarantors: unknown, rawApplicant: unknown, ctx: z.RefinementCtx, prefix: (string | number)[]) {
+  if (!Array.isArray(rawGuarantors)) return
+  const applicantPhone = normalized(field(rawApplicant, "phone"), 8)
+  const applicantDpi = normalized(field(rawApplicant, "identification"), 13)
+  const rows = rawGuarantors.map((g) => ({
+    phone: normalized(field(g, "phone"), 8),
+    identification: normalized(field(g, "identification"), 13),
+  }))
+  rows.forEach((g, i) => {
+    const others = rows.filter((_, j) => j !== i)
+    if (g.phone && g.phone === applicantPhone) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...prefix, i, "phone"], message: MESSAGES.phoneIsApplicant })
-    } else if (others.some((o) => o.phone === g.phone)) {
+    } else if (g.phone && others.some((o) => o.phone === g.phone)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...prefix, i, "phone"], message: MESSAGES.phoneRepeated })
     }
-    if (g.identification === applicantDpi) {
+    if (g.identification && g.identification === applicantDpi) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...prefix, i, "identification"], message: MESSAGES.dpiIsApplicant })
-    } else if (others.some((o) => o.identification === g.identification)) {
+    } else if (g.identification && others.some((o) => o.identification === g.identification)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...prefix, i, "identification"], message: MESSAGES.dpiRepeated })
     }
   })
+}
+
+/**
+ * Runs `base` and the raw cross-checks in the same pass and merges their errors (zod skips a
+ * superRefine when the base already failed, which would hide the cross-check errors).
+ */
+function withCrossChecks<S extends z.ZodTypeAny>(base: S, check: (raw: unknown, ctx: z.RefinementCtx) => void) {
+  return z
+    .any()
+    .superRefine((raw, ctx) => {
+      const result = base.safeParse(raw)
+      if (!result.success) for (const issue of result.error.issues) ctx.addIssue(issue as z.IssueData)
+      check(raw, ctx)
+    })
+    .transform((raw): z.output<S> => base.parse(raw))
 }
 
 const threeGuarantors = z
@@ -83,7 +110,7 @@ const threeGuarantors = z
  * Error paths look like `0.phone`; use `toFieldErrors(error, "guarantors")` for `guarantors.0.phone`.
  */
 export function makeGuarantorsSchema(applicant: { phone: string; identification: string }) {
-  return threeGuarantors.superRefine((guarantors, ctx) => checkGuarantors(guarantors, applicant, ctx, []))
+  return withCrossChecks(threeGuarantors, (raw, ctx) => checkGuarantorsRaw(raw, applicant, ctx, []))
 }
 
 const optionalText = (max: number) => z.string().trim().max(max).optional().default("")
@@ -128,7 +155,7 @@ export const authorizationSchema = z
   .string({ required_error: "Falta el número de autorización", invalid_type_error: "Falta el número de autorización" })
   .regex(/^[A-Za-z0-9_-]{8,64}$/, "Número de autorización inválido")
 
-export const guarantorRequestSchema = z
+const guarantorRequestBase = z
   .object({
     authorization: authorizationSchema,
     applicant: applicantSchema,
@@ -147,8 +174,11 @@ export const guarantorRequestSchema = z
     if (data.commission >= data.requestedAmount) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["commission"], message: "Comisión inválida" })
     }
-    checkGuarantors(data.guarantors, data.applicant, ctx, ["guarantors"])
   })
+
+export const guarantorRequestSchema = withCrossChecks(guarantorRequestBase, (raw, ctx) =>
+  checkGuarantorsRaw(field(raw, "guarantors"), field(raw, "applicant"), ctx, ["guarantors"]),
+)
 
 export type ParsedGuarantorRequest = z.output<typeof guarantorRequestSchema>
 
@@ -176,5 +206,5 @@ export function toFieldErrors(error: z.ZodError, prefix?: string): FieldErrors {
 type Assert<T extends true> = T
 type Accepts<S extends z.ZodTypeAny, T> = T extends z.input<S> ? true : false
 export type _GuarantorGuard = Assert<Accepts<typeof guarantorSchema, GuarantorInput>>
-export type _RequestGuard = Assert<Accepts<typeof guarantorRequestSchema, GuarantorRequestInput>>
+export type _RequestGuard = Assert<Accepts<typeof guarantorRequestBase, GuarantorRequestInput>>
 export type _AnswerGuard = Assert<Accepts<typeof guarantorAnswerSchema, GuarantorAnswerInput>>
