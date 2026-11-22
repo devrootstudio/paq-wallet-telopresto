@@ -5,7 +5,6 @@ import {
   sendTokenTyc,
   validateTokenTyc,
   validateCupo,
-  executeDisbursement,
   registerClient,
   editClient,
   type QueryClientResponse,
@@ -14,6 +13,7 @@ import { sendToMakeWebhook } from "@/lib/make-integration"
 import { validateSecurityToken } from "@/lib/security-token"
 import { createHash } from "crypto"
 import { generarPagare } from "@/lib/pagare"
+import { releaseRequest } from "@/lib/release"
 
 const ENABLE_TEST_BYPASS = process.env.ENABLE_TEST_BYPASS === "true" || process.env.ENABLE_TEST_BYPASS === "1"
 
@@ -1005,83 +1005,47 @@ export async function submitStep3Form(data: Step3FormData): Promise<ServerAction
       }
     }
 
-    // Execute disbursement
-    console.log("💰 Executing disbursement...")
-    console.log(`   Phone: ${data.phone}`)
-    console.log(`   ID Solicitud: ${data.idSolicitud}`)
-    console.log(`   Monto: Q${data.monto}`)
-    console.log(`   Comision: Q${data.comision}`)
-    console.log(`   Autorizacion: ${data.autorizacion}`)
+    // Execute disbursement + pagaré through the shared release service (lib/release.ts)
+    const release = await releaseRequest({
+      phone: cleanPhone,
+      idSolicitud: data.idSolicitud,
+      monto: data.monto,
+      comision: data.comision,
+      autorizacion: data.autorizacion,
+      pagare: {
+        identification: data.identification || "",
+        fullName: data.fullName || "",
+        email: data.email || "",
+        empresa: data.empresa || "",
+        edad: data.edad || "",
+        estadoCivil: data.estadoCivil || "",
+        domicilio: data.domicilio || "",
+        comisionPorcentaje: data.comisionPorcentaje ?? 0,
+        fingerprint: data.fingerprint || "",
+        screenResolution: data.screenResolution || "",
+        idiomaBrowser: data.idiomaBrowser || "",
+        ipInfo: data.ipInfo ?? null,
+        otpHash: data.otpHash || "",
+      },
+    })
 
-    let disbursementResponse
-    try {
-      disbursementResponse = await executeDisbursement(
-        data.phone,
-        data.idSolicitud,
-        data.monto,
-        data.comision,
-        data.autorizacion,
-      )
-    } catch (error) {
-      console.error("❌ Error executing disbursement:", error)
+    if (!release.success) {
+      console.error(`❌ Disbursement failed (code ${release.returnCode ?? "n/a"}): ${release.error}`)
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Error executing disbursement. Please try again later.",
+        error: release.error,
         errorType: "disbursement",
       }
     }
 
-    // Check if disbursement was successful
-    // Code 0 = success, Code 34 = success in disbursement but error in commission collection (also consider success)
-    const returnCode = disbursementResponse.returnCode
-    const isSuccessful = returnCode === 0 || returnCode === "0" || returnCode === 34 || returnCode === "34"
-
-    if (!isSuccessful) {
-      // Disbursement failed
-      const errorMessage = disbursementResponse.message || "Error executing disbursement"
-      console.error("❌ Disbursement execution failed:")
-      console.error(`   Code: ${returnCode}`)
-      console.error(`   Message: ${errorMessage}`)
-
-      return {
-        success: false,
-        error: errorMessage,
-        errorType: "disbursement",
-      }
-    }
-
-    // Disbursement executed successfully
-    console.log("✅ Disbursement executed successfully")
-    console.log(`   Code: ${returnCode}`)
-    console.log(`   Message: ${disbursementResponse.message}`)
-    const hasCommissionIssue = returnCode === 34 || returnCode === "34"
-    if (hasCommissionIssue) {
+    if (release.hasCommissionIssue) {
       console.warn("⚠️ Disbursement successful but commission collection had issues (Code 34)")
     }
 
-    const pagareUrl = await generarPagare({
-      phone: cleanPhone,
-      identification: data.identification || "",
-      fullName: data.fullName || "",
-      email: data.email || "",
-      empresa: data.empresa || "",
-      edad: data.edad || "",
-      estadoCivil: data.estadoCivil || "",
-      domicilio: data.domicilio || "",
-      autorizacion: data.autorizacion,
-      requestedAmount: data.monto,
-      comisionPorcentaje: data.comisionPorcentaje ?? 0,
-      fingerprint: data.fingerprint || "",
-      screenResolution: data.screenResolution || "",
-      idiomaBrowser: data.idiomaBrowser || "",
-      ipInfo: data.ipInfo ?? null,
-      otpHash: data.otpHash || "",
-    })
-
     return {
       success: true,
-      hasCommissionIssue: hasCommissionIssue,
-      pagareUrl: pagareUrl || "",
+      hasCommissionIssue: release.hasCommissionIssue,
+      pagareUrl: release.pagareUrl,
     }
   } catch (error) {
     console.error("❌ Error in submitStep3Form:", error)

@@ -43,7 +43,7 @@ interface FormData {
   pagareUrl: string
 }
 
-type ErrorType = "token" | "cupo" | "general" | "phone_number" | null
+type ErrorType = "token" | "cupo" | "general" | "phone_number" | "disbursement" | null
 
 export interface WizardState {
   step: Step

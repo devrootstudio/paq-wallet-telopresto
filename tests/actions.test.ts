@@ -18,6 +18,7 @@ vi.mock("@/lib/pagare", () => ({ generarPagare: vi.fn(async () => "https://pdf.e
 import * as soap from "@/lib/soap-client"
 import { sendToMakeWebhook } from "@/lib/make-integration"
 import { generarPagare } from "@/lib/pagare"
+import { clearMemoryReleaseStore } from "@/lib/release"
 import {
   submitStep0Form,
   submitStep1Form,
@@ -59,6 +60,7 @@ const step3Data = {
 
 beforeEach(() => {
   cookieJar.clear()
+  clearMemoryReleaseStore()
   vi.clearAllMocks()
 })
 
@@ -290,6 +292,22 @@ describe("step 3 · disbursement (Ejecuta_Desembolso + pagaré)", () => {
     const r = await submitStep3Form(step3Data)
     expect(r).toMatchObject({ success: false, error: "SOAP caído", errorType: "disbursement" })
     expect(generarPagare).not.toHaveBeenCalled()
+  })
+
+  it("a second confirmation with the same authorization does not disburse again", async () => {
+    m(soap.executeDisbursement).mockResolvedValue({ returnCode: 0 })
+    const first = await submitStep3Form(step3Data)
+    const second = await submitStep3Form(step3Data)
+    expect(soap.executeDisbursement).toHaveBeenCalledTimes(1)
+    expect(second).toEqual(first)
+  })
+
+  it("a failed disbursement can be retried with the same authorization", async () => {
+    m(soap.executeDisbursement).mockResolvedValueOnce({ returnCode: 7, message: "Fondos insuficientes" })
+    m(soap.executeDisbursement).mockResolvedValueOnce({ returnCode: 0 })
+    expect((await submitStep3Form(step3Data)).success).toBe(false)
+    expect((await submitStep3Form(step3Data)).success).toBe(true)
+    expect(soap.executeDisbursement).toHaveBeenCalledTimes(2)
   })
 
   it("a pagaré that could not be generated leaves pagareUrl empty but the disbursement stands", async () => {
