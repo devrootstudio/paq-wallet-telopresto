@@ -1,6 +1,8 @@
 "use server"
 
 import { validateSecurityToken } from "@/lib/security-token"
+import { airtableFromEnv, AirtableError } from "@/lib/airtable"
+import { createAvalesRepo } from "@/lib/avales/repo"
 import { guarantorRequestSchema, toFieldErrors } from "@/lib/avales/schema"
 import type {
   AnswerResult,
@@ -21,10 +23,27 @@ function readRuta(): Ruta {
   return process.env.TELOPRESTO_RUTA === "normal" ? "normal" : "aval"
 }
 
+function repoFromEnv() {
+  const airtable = airtableFromEnv()
+  if (!airtable) {
+    console.error("[avales] storage not configured: AIRTABLE_TOKEN or AIRTABLE_BASE_ID missing")
+    return null
+  }
+  return createAvalesRepo({ airtable })
+}
+
+function describe(error: unknown): string {
+  if (error instanceof AirtableError) return `${error.status} ${error.type}`
+  return error instanceof Error ? error.name : "unknown"
+}
+
 /** Which Step 3 to show: `TELOPRESTO_RUTA`, `aval` unless it is exactly `normal`. */
 export async function getRutaAction(): Promise<Ruta> {
   return readRuta()
 }
+
+/** Submits in flight on this server instance, by authorization: a double click shares one call. */
+const inFlight = new Map<string, Promise<SubmitResult>>()
 
 /**
  * Paso 3b: validates again and stores the request with its three guarantors.
@@ -37,14 +56,45 @@ export async function submitGuarantorRequest(input: GuarantorRequestInput): Prom
   const parsed = guarantorRequestSchema.safeParse(input)
   if (!parsed.success) return { ok: false, code: "validation", fieldErrors: toFieldErrors(parsed.error) }
 
-  // Storage lands in the next commit (lib/avales/repo.ts).
-  return { ok: false, code: "unavailable" }
+  const key = parsed.data.authorization
+  const pending = inFlight.get(key)
+  if (pending) {
+    const shared = await pending
+    return shared.ok ? { ...shared, reused: true } : shared
+  }
+
+  const run = (async (): Promise<SubmitResult> => {
+    const repo = repoFromEnv()
+    if (!repo) return { ok: false, code: "unavailable" }
+    try {
+      const outcome = await repo.submit(parsed.data)
+      return { ok: true, ...outcome }
+    } catch (error) {
+      console.error(`[avales] submit failed: ${describe(error)}`)
+      return { ok: false, code: "unavailable" }
+    }
+  })()
+  inFlight.set(key, run)
+  try {
+    return await run
+  } finally {
+    inFlight.delete(key)
+  }
 }
 
-/** /aval/<token>: which screen to render (contract §4). */
+/**
+ * /aval/<token>: which screen to render (contract §4).
+ * Throws (without details) when storage is unavailable, so the route's error boundary handles it.
+ */
 export async function getGuarantorView(token: string): Promise<GuarantorView> {
-  void token
-  return { screen: "invalid" }
+  const repo = repoFromEnv()
+  if (!repo) throw new Error("Guarantor view unavailable")
+  try {
+    return await repo.view(token)
+  } catch (error) {
+    console.error(`[avales] view failed: ${describe(error)}`)
+    throw new Error("Guarantor view unavailable")
+  }
 }
 
 /** /aval/<token>: the guarantor accepts or rejects. Stub until the RENAP task implements it. */
