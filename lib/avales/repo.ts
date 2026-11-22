@@ -73,6 +73,7 @@ export interface SubmitOutcome {
   expiresAt: string
   requestedAmount: number
   reused: boolean
+  open: boolean
 }
 
 export interface AvalesRepoDeps {
@@ -205,6 +206,10 @@ export function createAvalesRepo(deps: AvalesRepoDeps) {
       for (const row of uninitialized) row.fields.status = "pending"
     }
     await closeDuplicateSlots(rows)
+
+    // Never report success without one guarantor with a status per position (→ `unavailable`, retry).
+    const ready = new Set(rows.filter((row) => row.fields.status).map((row) => row.fields.slot))
+    if (!POSITIONS.every((p) => ready.has(slotOf(requestId, p)))) throw new Error("Guarantors incomplete after write")
   }
 
   /**
@@ -259,24 +264,31 @@ export function createAvalesRepo(deps: AvalesRepoDeps) {
    * Stores the request and its three guarantors. Idempotent by `authorization`; a retry returns the
    * existing request (`reused: true`) and completes any guarantor an interrupted call left missing.
    *
-   * Limitation: if Airtable ever processed two upserts on the same `authorization` at the very same
-   * moment, two requests would exist. The post-write check makes every caller converge on the oldest
-   * one and only that one gets guarantors; the newer stays as an empty `pending_guarantors` record
-   * (no guarantors) that the job must ignore.
+   * `open` is true while the request still accepts answers (`pending_guarantors`, deadline ahead).
+   * Only an open request is completed; a resolved or past-deadline one is returned as is.
+   *
+   * Limitations (Airtable has no unique constraint nor conditional writes):
+   * - if Airtable ever processed two upserts on the same `authorization` at the very same moment, two
+   *   requests would exist. The post-write check makes every caller converge on the oldest one and
+   *   only that one gets guarantors; the newer stays as an empty `pending_guarantors` record (no
+   *   guarantors) that the job must ignore;
+   * - a retry never compares its data with what is stored: the existing request wins. But when two
+   *   instances submit the same `authorization` with different data at the same moment (both miss
+   *   the lookup), the second upsert overwrites the request fields written by the first; guarantors
+   *   keep the data of whichever call created each position.
    */
   async function submit(input: ParsedGuarantorRequest): Promise<SubmitOutcome> {
     const existing = await findRequests(input.authorization)
     if (existing.length > 0) {
       const canonical = canonicalOf(existing)
-      // Only an open request is completed; a resolved or past-deadline one is returned as is.
-      const deadline = Date.parse(canonical.fields["expires-at"] ?? "")
-      const open = canonical.fields.status === "pending_guarantors" && now().getTime() < deadline
+      const open = isOpen(canonical)
       if (open) await ensureGuarantors(canonical.id, input)
       return {
         requestId: canonical.id,
         expiresAt: canonical.fields["expires-at"] ?? "",
         requestedAmount: canonical.fields["requested-amount"] ?? input.requestedAmount,
         reused: true,
+        open,
       }
     }
 
@@ -287,14 +299,21 @@ export function createAvalesRepo(deps: AvalesRepoDeps) {
 
     const after = await findRequests(input.authorization)
     const canonical = after.length > 0 ? canonicalOf(after) : own
-    await ensureGuarantors(canonical.id, input)
+    const open = isOpen(canonical)
+    if (open) await ensureGuarantors(canonical.id, input)
     const created = canonical.id === own.id && upserted.createdRecords.includes(own.id)
     return {
       requestId: canonical.id,
       expiresAt: canonical.fields["expires-at"] ?? expiresAt,
       requestedAmount: canonical.fields["requested-amount"] ?? input.requestedAmount,
       reused: !created,
+      open,
     }
+  }
+
+  function isOpen(request: AirtableRecord<RequestFields>): boolean {
+    const deadline = Date.parse(request.fields["expires-at"] ?? "")
+    return request.fields.status === "pending_guarantors" && now().getTime() < deadline
   }
 
   /** Resolves /aval/<token>. Unknown or malformed tokens give `invalid` without touching storage. */
