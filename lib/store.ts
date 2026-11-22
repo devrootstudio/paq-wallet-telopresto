@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import type { Ruta } from "@/lib/avales/types"
 
 type Step = 0 | 1 | 2 | 3 | 4 | 5
 
@@ -45,12 +46,33 @@ interface FormData {
 
 type ErrorType = "token" | "cupo" | "general" | "phone_number" | "disbursement" | null
 
+
+/**
+ * Screens of the guarantor route that live inside Step 3:
+ * - `avales`: Step 3b, the form with the 3 guarantors.
+ * - `en-revision`: the request was saved and waits for 2 of 3 guarantors.
+ */
+export type AvalStage = "avales" | "en-revision" | null
+
+/** What the "en revisión" screen needs once the request is saved. */
+export interface GuarantorRequestSummary {
+  amount: number
+  expiresAt: string
+}
+
 export interface WizardState {
   step: Step
   isLoading: boolean
   formData: FormData
   errorMessage: string | null
   errorFromStep: Step | null
+  /** Which Step 3 flow applies (TELOPRESTO_RUTA). `null` until the server answers. */
+  ruta: Ruta | null
+  avalStage: AvalStage
+  guarantorRequest: GuarantorRequestSummary | null
+  setRuta: (ruta: Ruta) => void
+  setAvalStage: (stage: AvalStage) => void
+  setGuarantorRequest: (summary: GuarantorRequestSummary | null) => void
   setStep: (step: Step) => void
   setLoading: (loading: boolean) => void
   setErrorStep: (errorType?: ErrorType, errorMessage?: string) => void
@@ -67,6 +89,9 @@ export const useWizardStore = create<WizardState>((set) => ({
   isLoading: false,
   errorMessage: null,
   errorFromStep: null,
+  ruta: null,
+  avalStage: null,
+  guarantorRequest: null,
   formData: {
     identification: "",
     fullName: "",
@@ -97,6 +122,9 @@ export const useWizardStore = create<WizardState>((set) => ({
     comisionPorcentaje: 0,
     pagareUrl: "",
   },
+  setRuta: (ruta) => set({ ruta }),
+  setAvalStage: (avalStage) => set({ avalStage }),
+  setGuarantorRequest: (guarantorRequest) => set({ guarantorRequest }),
   setStep: (step) => set({ step }),
   setLoading: (loading) => set({ isLoading: loading }),
   setErrorStep: (errorType, errorMessage) =>
@@ -230,6 +258,9 @@ export const useWizardStore = create<WizardState>((set) => ({
       isLoading: false,
       errorMessage: null,
       errorFromStep: null,
+      ruta: null,
+      avalStage: null,
+      guarantorRequest: null,
       formData: {
         identification: "",
         fullName: "",
