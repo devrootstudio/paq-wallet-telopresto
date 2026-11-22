@@ -61,6 +61,8 @@ export interface GuarantorRequestSummary {
   expiresAt: string
   /** true when a request with the same authorization already existed (safe retry). */
   reused: boolean
+  /** false only on a retry over a request that already expired or was resolved. */
+  open: boolean
 }
 
 export interface WizardState {

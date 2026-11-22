@@ -29,6 +29,21 @@ export default function Step3cEnRevision() {
   }, [])
   const timeLeft = guarantorRequest ? formatTimeLeft(guarantorRequest.expiresAt, now) : null
 
+  // A retry over a request that already expired or was resolved: nothing is in review any more.
+  if (guarantorRequest?.reused && !guarantorRequest.open) {
+    return (
+      <div className="w-full max-w-md mx-auto px-4 py-8 flex flex-col justify-center items-center min-h-[60vh] animate-in zoom-in-95 duration-500">
+        <div className="bg-paq-yellow rounded-3xl p-8 w-full flex flex-col justify-center items-center text-center shadow-xl">
+          <h2 className="text-2xl font-bold text-paq-green leading-tight mb-3">Esta solicitud ya no está activa</h2>
+          <p className="text-sm text-paq-green/90 leading-relaxed">
+            Ya habíamos recibido una solicitud con estos datos y ya no está activa. Puedes iniciar una nueva más tarde.
+          </p>
+          <p className="mt-6 text-sm font-bold text-paq-green">Ya puedes cerrar esta pantalla.</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="w-full max-w-md mx-auto px-4 py-8 flex flex-col justify-center items-center min-h-[60vh] animate-in zoom-in-95 duration-500">
       <div className="bg-paq-yellow rounded-3xl p-8 w-full flex flex-col justify-center items-center text-center shadow-xl">

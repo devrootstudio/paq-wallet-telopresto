@@ -216,6 +216,7 @@ export async function requestGuarantors(
         amount: result.requestedAmount,
         expiresAt: result.expiresAt,
         reused: result.reused,
+        open: result.open,
       })
       store.setAvalStage("en-revision")
       return { sent: true, errors: {}, message: null }

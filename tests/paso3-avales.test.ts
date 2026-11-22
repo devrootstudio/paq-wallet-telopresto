@@ -158,7 +158,7 @@ describe("page routing inside Step 3", () => {
     view.state.avalStage = "avales"
     expect(renderToStaticMarkup(createElement(Home))).toContain("Último paso: solicita tus avales")
     view.state.avalStage = "en-revision"
-    view.state.guarantorRequest = { amount: 2500, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), reused: false }
+    view.state.guarantorRequest = { amount: 2500, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), reused: false, open: true }
     expect(renderToStaticMarkup(createElement(Home))).toContain("En revisión")
     view.state.avalStage = null
     expect(renderToStaticMarkup(createElement(Home))).toContain("Solicitar aval")
@@ -314,6 +314,7 @@ describe("Paso 3b submit", () => {
       expiresAt: "2026-11-24T12:00:00.000Z",
       requestedAmount: 2500,
       reused: false,
+      open: true,
     })
     const store = fakeStore()
     const outcome = await requestGuarantors(formData, validGuarantors(), store)
@@ -324,6 +325,7 @@ describe("Paso 3b submit", () => {
       amount: 2500,
       expiresAt: "2026-11-24T12:00:00.000Z",
       reused: false,
+      open: true,
     })
     expect(store.setAvalStage).toHaveBeenCalledWith("en-revision")
   })
@@ -335,10 +337,11 @@ describe("Paso 3b submit", () => {
       expiresAt: "2026-11-24T12:00:00.000Z",
       requestedAmount: 1800,
       reused: true,
+      open: true,
     })
     const store = fakeStore()
     await requestGuarantors(formData, validGuarantors(), store)
-    expect(store.setGuarantorRequest).toHaveBeenCalledWith({ amount: 1800, expiresAt: "2026-11-24T12:00:00.000Z", reused: true })
+    expect(store.setGuarantorRequest).toHaveBeenCalledWith({ amount: 1800, expiresAt: "2026-11-24T12:00:00.000Z", reused: true, open: true })
     expect(store.setAvalStage).toHaveBeenCalledWith("en-revision")
   })
 
@@ -382,6 +385,7 @@ describe("en revisión", () => {
       amount: 2500,
       expiresAt: new Date(Date.now() + 48 * 3_600_000 - 60_000).toISOString(),
       reused: false,
+      open: true,
     }
     const html = renderToStaticMarkup(createElement(Step3cEnRevision))
     expect(html).toContain("En revisión")
@@ -394,10 +398,34 @@ describe("en revisión", () => {
   })
 
   it("a reused request shows the stored amount and says it was already received", () => {
-    view.state.guarantorRequest = { amount: 1800, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), reused: true }
+    view.state.guarantorRequest = { amount: 1800, expiresAt: new Date(Date.now() + 3_600_000).toISOString(), reused: true, open: true }
     const html = renderToStaticMarkup(createElement(Step3cEnRevision))
     expect(html).toContain("Ya habíamos recibido tu solicitud")
     expect(html).toContain("Q1800.00")
+  })
+
+  it("a retry over a request that is no longer active shows a neutral message, not en revisión", () => {
+    view.state.guarantorRequest = { amount: 1800, expiresAt: new Date(Date.now() - 3_600_000).toISOString(), reused: true, open: false }
+    const html = renderToStaticMarkup(createElement(Step3cEnRevision))
+    expect(html).toContain("Ya habíamos recibido una solicitud con estos datos y ya no está activa")
+    expect(html).not.toContain("En revisión")
+    expect(html).not.toContain("sigue en revisión")
+    expect(html).not.toContain("0:00 h")
+    expect(html).not.toContain("está reservado")
+  })
+
+  it("the closed state is passed through from the server", async () => {
+    m(submitGuarantorRequest).mockResolvedValue({
+      ok: true,
+      requestId: "rec1",
+      expiresAt: "2026-11-20T12:00:00.000Z",
+      requestedAmount: 1800,
+      reused: true,
+      open: false,
+    })
+    const store = fakeStore()
+    await requestGuarantors(formData, validGuarantors(), store)
+    expect(store.setGuarantorRequest).toHaveBeenCalledWith(expect.objectContaining({ reused: true, open: false }))
   })
 
   it("time left is h:mm and never negative", () => {
