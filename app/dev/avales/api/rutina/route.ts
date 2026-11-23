@@ -13,8 +13,9 @@ export async function POST(request: Request) {
   const secret = jobsSecret()
   if (!secret) return NextResponse.json({ ok: false, error: "not_configured" }, { status: 503, headers: noStore })
 
-  const origin = new URL(request.url).origin
-  const response = await fetch(`${origin}/api/jobs/guarantors`, {
+  // Always this same local server: never an origin taken from the Host header.
+  const port = new URL(request.url).port || "3000"
+  const response = await fetch(`http://localhost:${port}/api/jobs/guarantors`, {
     method: "POST",
     headers: { Authorization: `Bearer ${secret}` },
     cache: "no-store",

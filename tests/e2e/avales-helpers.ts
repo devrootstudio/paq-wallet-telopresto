@@ -22,6 +22,8 @@ export interface JobReport {
   quorum?: string[]
   expired?: string[]
   released?: { requestId: string; status: string; returnCode?: string }[]
+  unrecorded?: { requestId: string; returnCode: string }[]
+  stuck?: string[]
   errors?: { step: string; id?: string; error: string }[]
 }
 
@@ -40,15 +42,16 @@ export const testAuth = (label: string) => `TEST-AVALES-e2e-${label}-${Date.now(
 
 /**
  * Three fictitious guarantors with distinct DPI and phones (never the applicant's, 9000000000101 /
- * 90000001). DPIs end in 0101/0202/0303, so RENAP simulation authorizes them unless a test overrides
- * one with a 0000 ending (identity mismatch).
+ * 19000001). Test phones use the fixed prefixes 100/101/102: numbers starting with 1 are not assigned
+ * in Guatemala, so no real person is ever "invited". DPIs end in 0101/0202/0303, so RENAP simulation
+ * authorizes them unless a test overrides one with a 0000 ending (identity mismatch).
  */
 export function guarantors(): [GuarantorData, GuarantorData, GuarantorData] {
   const base = random(5)
   return [
-    { fullName: "Aval Uno Prueba", identification: `1${base}${random(3)}0101`, phone: `3${random(7)}`, relationship: "hermano/a" },
-    { fullName: "Aval Dos Prueba", identification: `2${base}${random(3)}0202`, phone: `4${random(7)}`, relationship: "amigo/a" },
-    { fullName: "Aval Tres Prueba", identification: `3${base}${random(3)}0303`, phone: `5${random(7)}`, relationship: "vecino/a" },
+    { fullName: "Aval Uno Prueba", identification: `1${base}${random(3)}0101`, phone: `100${random(5)}`, relationship: "hermano/a" },
+    { fullName: "Aval Dos Prueba", identification: `2${base}${random(3)}0202`, phone: `101${random(5)}`, relationship: "amigo/a" },
+    { fullName: "Aval Tres Prueba", identification: `3${base}${random(3)}0303`, phone: `102${random(5)}`, relationship: "vecino/a" },
   ]
 }
 
@@ -135,3 +138,4 @@ export const REJECTED = "Registramos que no avalas la solicitud"
 export const CLOSED = "Esta solicitud ya se resolvió"
 export const EXPIRED = "Esta solicitud venció"
 export const CHECK_DATA = "No pudimos confirmar tus datos"
+export const BUSY = "Estamos registrando otra respuesta"

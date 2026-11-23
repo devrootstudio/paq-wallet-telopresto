@@ -1,5 +1,6 @@
 import { expect, test } from "playwright/test"
 import {
+  BUSY,
   CHECK_DATA,
   CLOSED,
   EXPIRED,
@@ -42,6 +43,10 @@ test("feliz: 2 avales aceptan → la rutina desembolsa", async ({ page, request,
   expect(report.httpStatus).toBe(200)
   expect(report.quorum).toContain(requestId)
   expect(report.released).toContainEqual(expect.objectContaining({ requestId, status: "disbursed" }))
+  // Nothing about this request needs attention (other requests in the base may have their own).
+  expect((report.errors ?? []).filter((e) => e.id === requestId)).toEqual([])
+  expect((report.unrecorded ?? []).filter((u) => u.requestId === requestId)).toEqual([])
+  expect(report.stuck ?? []).not.toContain(requestId)
 
   const final = await state(request, auth)
   expect(final.status).toBe("disbursed")
@@ -151,18 +156,21 @@ test("doble aceptación simultánea: un solo desembolso", async ({ page, request
   const { requestId, links } = await createAndInvite(page, request, auth, guarantors())
 
   // The same guarantor answers from two tabs at the same time: only one answer is registered (it
-  // checks the identity and writes the evidence); the other one gets `closed`.
+  // checks the identity and writes the evidence). The other one sees "busy" (another answer is being
+  // recorded) or, if it arrives once the first is registered, "closed". Never two thank-you screens.
   const tabA = await openLink(browser, links[1])
   const tabB = await openLink(browser, links[1])
   for (const tab of [tabA, tabB]) await tab.getByRole("checkbox").check()
   await Promise.all([tabA, tabB].map((tab) => tab.getByRole("button", { name: "Avalar" }).click()))
   const screens = await Promise.all(
     [tabA, tabB].map(async (tab) => {
-      await expect(tab.getByText(THANKS).or(tab.getByText(CLOSED))).toBeVisible()
-      return (await tab.getByText(THANKS).count()) > 0 ? "thanks" : "closed"
+      await expect(tab.getByText(THANKS).or(tab.getByText(CLOSED)).or(tab.getByText(BUSY))).toBeVisible()
+      if ((await tab.getByText(THANKS).count()) > 0) return "thanks"
+      return (await tab.getByText(BUSY).count()) > 0 ? "busy" : "closed"
     }),
   )
-  expect(screens.sort()).toEqual(["closed", "thanks"])
+  expect(screens.filter((s) => s === "thanks")).toHaveLength(1)
+  expect(["busy", "closed"]).toContain(screens.find((s) => s !== "thanks"))
   expect((await state(request, auth)).guarantors?.[0].status).toBe("authorized")
   await Promise.all([tabA, tabB].map((tab) => tab.context().close()))
 

@@ -8,9 +8,12 @@ import Step3cEnRevision from "@/components/steps/step-3c-en-revision"
 
 const TEST_AUTH = /^TEST-AVALES-[A-Za-z0-9_-]{1,48}$/
 
-/** Fictitious applicant: never a real person. */
+/**
+ * Fictitious applicant: never a real person. Phones in the test data start with 1, a prefix that is
+ * not assigned to Guatemalan numbers, so no real phone is ever written.
+ */
 const APPLICANT = {
-  phone: "90000001",
+  phone: "19000001",
   identification: "9000000000101",
   fullName: "María Fernanda Solicitante Ejemplo",
   email: "solicitante@example.com",

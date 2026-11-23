@@ -29,6 +29,7 @@ Cada caso tarda entre 30 y 60 s: una corrida de la rutina que libera espera unos
 ## Datos
 
 - Cada solicitud usa `authorization` = `TEST-AVALES-e2e-<caso>-<id>` y datos ficticios. Los registros no se borran.
+- Los teléfonos de prueba empiezan con 1 (solicitante `19000001`, avales `100…`, `101…`, `102…`). En Guatemala no hay números asignados con ese prefijo, así que ningún dato de prueba apunta a una persona real.
 - La rutina procesa todas las solicitudes pendientes de la base, no solo las del test. No la corras a la vez desde otro server (respondería 409, o invitaría a los avales antes que el test).
 
 ## Herramientas de desarrollo que usan
