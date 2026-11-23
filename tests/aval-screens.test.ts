@@ -246,6 +246,15 @@ describe("answers", () => {
     expect(await submitAnswer("tok", "accept", data, send)).toMatchObject({ kind: "form", retry: true, message: expect.stringMatching(/conexión/) })
   })
 
+  it("a rejected declaration asks to reload instead of pointing at no field", async () => {
+    const send = vi.fn().mockResolvedValueOnce({ ok: false, code: "validation", fieldErrors: { acceptedText: "x" } })
+    expect(await submitAnswer("tok", "accept", data, send)).toEqual({
+      kind: "form",
+      fieldErrors: {},
+      message: expect.stringMatching(/Recarga la página/),
+    })
+  })
+
   it("server validation errors are shown on their fields", async () => {
     const send = vi.fn().mockResolvedValueOnce({ ok: false, code: "validation", fieldErrors: { phone: "El teléfono debe tener 8 dígitos" } })
     expect(await submitAnswer("tok", "accept", data, send)).toEqual({

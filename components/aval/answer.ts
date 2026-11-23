@@ -31,6 +31,14 @@ function outcomeFor(result: Extract<AnswerResult, { ok: false }>): AnswerOutcome
     case "invalid":
       return { kind: "ended", screen: result.code }
     case "validation":
+      // The declaration on screen no longer matches the server's (e.g. a new version): reload.
+      if (result.fieldErrors?.acceptedText) {
+        return {
+          kind: "form",
+          fieldErrors: {},
+          message: "La declaración se actualizó. Recarga la página, revísala y vuelve a avalar.",
+        }
+      }
       return { kind: "form", fieldErrors: result.fieldErrors ?? {}, message: "Revisa los datos marcados." }
     case "unavailable":
     // `not_available` is deprecated (former stub): treated as a temporary failure.
