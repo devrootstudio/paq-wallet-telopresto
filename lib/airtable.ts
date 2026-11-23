@@ -8,6 +8,8 @@
 const API_URL = "https://api.airtable.com/v0"
 /** Airtable accepts at most 10 records per write request. */
 const WRITE_BATCH = 10
+/** Default per-request timeout. The guarantor job's release claim waits longer than this. */
+export const AIRTABLE_TIMEOUT_MS = 10_000
 
 export type Fields = Record<string, unknown>
 
@@ -89,7 +91,7 @@ async function errorType(response: Response): Promise<string> {
 
 export function createAirtableClient(options: AirtableClientOptions): AirtableClient {
   const doFetch = options.fetch ?? globalThis.fetch
-  const timeoutMs = options.timeoutMs ?? 10_000
+  const timeoutMs = options.timeoutMs ?? AIRTABLE_TIMEOUT_MS
   const tableUrl = (table: string) => `${API_URL}/${options.baseId}/${encodeURIComponent(table)}`
 
   async function request<T>(

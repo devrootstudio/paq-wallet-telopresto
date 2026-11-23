@@ -49,10 +49,24 @@ export type GuarantorStatus =
 export interface RequestFields {
   [key: string]: unknown
   authorization?: string
+  phone?: string
+  identification?: string
   "full-name"?: string
+  email?: string
+  company?: string
+  age?: string
+  "marital-status"?: string
+  address?: string
+  "cupo-id"?: string
+  "approved-amount"?: number
   "requested-amount"?: number
+  commission?: number
+  "commission-pct"?: number
   status?: RequestStatus
   "expires-at"?: string
+  "release-code"?: string
+  "release-claim"?: string
+  audit?: string
 }
 
 export interface GuarantorFields {
@@ -66,6 +80,12 @@ export interface GuarantorFields {
   relationship?: Relationship
   "token-hash"?: string
   status?: GuarantorStatus
+  "invited-at"?: string
+  "answered-at"?: string
+  "renap-result"?: string
+  "renap-raw"?: string
+  evidence?: string
+  "guarantor-leads"?: string[]
 }
 
 export interface SubmitOutcome {
@@ -324,17 +344,24 @@ export function createAvalesRepo(deps: AvalesRepoDeps) {
 
   /** Resolves /aval/<token>. Unknown or malformed tokens give `invalid` without touching storage. */
   async function view(token: string): Promise<GuarantorView> {
-    if (!isWellFormedToken(token)) return { screen: "invalid" }
+    const found = await findByToken(token)
+    if (!found) return { screen: "invalid" }
+    return resolveView(found.guarantor, found.request, now())
+  }
+
+  /** The guarantor a link token belongs to and its request, or null for an unknown/malformed token. */
+  async function findByToken(token: string) {
+    if (!isWellFormedToken(token)) return null
     const matches = await airtable.list<GuarantorFields>(TABLES.guarantors, {
       filterByFormula: `{token-hash} = ${formulaString(hashToken(token))}`,
       maxRecords: 1,
     })
     const guarantor = matches[0]
     const requestId = guarantor?.fields.request?.[0]
-    if (!guarantor || !requestId) return { screen: "invalid" }
+    if (!guarantor || !requestId) return null
     const request = await airtable.get<RequestFields>(TABLES.requests, requestId)
-    if (!request) return { screen: "invalid" }
-    return resolveView(guarantor, request, now())
+    if (!request) return null
+    return { guarantor, request }
   }
 
   /**
@@ -354,7 +381,7 @@ export function createAvalesRepo(deps: AvalesRepoDeps) {
     return token
   }
 
-  return { submit, view, issueGuarantorToken }
+  return { submit, view, findByToken, issueGuarantorToken, guarantorsOf, isOpen }
 }
 
 export type AvalesRepo = ReturnType<typeof createAvalesRepo>

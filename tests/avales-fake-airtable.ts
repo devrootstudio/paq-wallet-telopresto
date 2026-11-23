@@ -2,7 +2,8 @@
  * In-memory stand-in for the Airtable REST API, served through a fake `fetch`.
  * Supports exactly what lib/airtable.ts sends: list (with the formulas lib/avales/repo.ts builds),
  * get, create, update and performUpsert (atomic by default, or not, per table, to simulate races).
- * Also keeps the requests.guarantors inverse link like Airtable (the code does not rely on it).
+ * Also keeps the inverse links Airtable maintains: requests.guarantors (the code does not rely on
+ * it) and guarantors.guarantor-leads (the job's lead step uses it to skip guarantors with a lead).
  */
 
 type Fields = Record<string, unknown>
@@ -36,32 +37,40 @@ export function createFakeAirtable(options: { now?: () => Date; nonAtomicUpsertT
   const json = (status: number, body: unknown) =>
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
 
-  function link(rec: Rec) {
-    const requestIds = rec.fields.request as string[] | undefined
-    for (const rid of requestIds ?? []) {
-      const parent = table("requests").find((r) => r.id === rid)
-      if (parent) parent.fields.guarantors = [...((parent.fields.guarantors as string[]) ?? []), rec.id]
+  /** Inverse links Airtable keeps: requests.guarantors and guarantors.guarantor-leads. */
+  function link(name: string, rec: Rec) {
+    const inverse = (parentTable: string, ids: unknown, field: string) => {
+      for (const id of (ids as string[] | undefined) ?? []) {
+        const parent = table(parentTable).find((r) => r.id === id)
+        if (parent) parent.fields[field] = [...((parent.fields[field] as string[]) ?? []), rec.id]
+      }
     }
+    if (name === "guarantors") inverse("requests", rec.fields.request, "guarantors")
+    if (name === "guarantor-leads") inverse("guarantors", rec.fields.guarantor, "guarantor-leads")
   }
 
   function insert(name: string, fields: Fields): Rec {
     const rec: Rec = { id: newId(), createdTime: now().toISOString(), fields: { ...fields } }
     table(name).push(rec)
-    if (name === "guarantors") link(rec)
+    link(name, rec)
     return rec
   }
 
-  /** Supports `{field} = '…'`, `RECORD_ID() = '…'` and `OR(<those>, …)`. */
+  /** Supports `{field} = '…'`, `{field} = BLANK()`, `RECORD_ID() = '…'` and `OR(<those>, …)`. */
   function matcher(formula: string | null): (r: Rec) => boolean {
     if (!formula) return () => true
     const unquote = (s: string) => s.slice(1, -1).replace(/\\'/g, "'").replace(/\\\\/g, "\\")
-    const clause = /(\{[^}]+\}|RECORD_ID\(\)) = ('(?:[^'\\]|\\.)*')/g
+    const clause = /(\{[^}]+\}|RECORD_ID\(\)) = ('(?:[^'\\]|\\.)*'|BLANK\(\))/g
     const inner = formula.match(/^OR\((.*)\)$/)?.[1] ?? formula
-    const clauses = [...inner.matchAll(clause)].map((m) => ({ left: m[1], value: unquote(m[2]) }))
+    const clauses = [...inner.matchAll(clause)].map((m) => ({ left: m[1], value: m[2] === "BLANK()" ? null : unquote(m[2]) }))
     const rebuilt = [...inner.matchAll(clause)].map((m) => m[0]).join(", ")
     if (clauses.length === 0 || rebuilt !== inner) throw new Error(`fake airtable: unsupported formula ${formula}`)
+    const isBlank = (v: unknown) => v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0)
     return (r) =>
-      clauses.some(({ left, value }) => (left === "RECORD_ID()" ? r.id === value : r.fields[left.slice(1, -1)] === value))
+      clauses.some(({ left, value }) => {
+        const actual = left === "RECORD_ID()" ? r.id : r.fields[left.slice(1, -1)]
+        return value === null ? isBlank(actual) : actual === value
+      })
   }
 
   const fetchImpl = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {

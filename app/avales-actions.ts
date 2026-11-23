@@ -1,7 +1,10 @@
 "use server"
 
+import { headers } from "next/headers"
 import { validateSecurityToken } from "@/lib/security-token"
 import { airtableFromEnv, AirtableError } from "@/lib/airtable"
+import { answerGuarantorWith, type AnswerMeta } from "@/lib/avales/answer"
+import { renapFromEnv } from "@/lib/avales/renap"
 import { createAvalesRepo } from "@/lib/avales/repo"
 import { guarantorRequestSchema, toFieldErrors } from "@/lib/avales/schema"
 import { isWellFormedToken } from "@/lib/avales/tokens"
@@ -100,14 +103,37 @@ export async function getGuarantorView(token: string): Promise<GuarantorView> {
   }
 }
 
-/** /aval/<token>: the guarantor accepts or rejects. Stub until the RENAP task implements it. */
+/** IP and user agent of the guarantor, for the answer evidence. Empty when unavailable. */
+async function requestMeta(): Promise<AnswerMeta> {
+  try {
+    const h = await headers()
+    const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || h.get("x-real-ip") || ""
+    return { ip, userAgent: h.get("user-agent") ?? "" }
+  } catch {
+    return { ip: "", userAgent: "" }
+  }
+}
+
+/**
+ * /aval/<token>: the guarantor accepts or rejects (contract §5, §6). The link token is the credential.
+ * RENAP is simulated with the test bypass outside production; without it and without RENAP_*
+ * credentials, `accept` answers `unavailable`.
+ */
 export async function answerGuarantor(
   token: string,
   answer: GuarantorAnswer,
   data: GuarantorAnswerInput,
 ): Promise<AnswerResult> {
-  void token
-  void answer
-  void data
-  return { ok: false, code: "not_available" }
+  if (!isWellFormedToken(token)) return { ok: false, code: "invalid" }
+  const airtable = airtableFromEnv()
+  if (!airtable) {
+    console.error("[avales] storage not configured: AIRTABLE_TOKEN or AIRTABLE_BASE_ID missing")
+    return { ok: false, code: "unavailable" }
+  }
+  try {
+    return await answerGuarantorWith({ airtable, renap: renapFromEnv() }, token, answer, data, await requestMeta())
+  } catch (error) {
+    console.error(`[avales] answer failed: ${describe(error)}`)
+    return { ok: false, code: "unavailable" }
+  }
 }
