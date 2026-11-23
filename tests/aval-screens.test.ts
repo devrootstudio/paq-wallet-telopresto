@@ -11,7 +11,7 @@ import { answerGuarantor, getGuarantorView } from "@/app/avales-actions"
 import AvalScreen, { applicantInitials } from "@/components/aval/aval-screen"
 import AvalError from "@/components/aval/aval-error"
 import AvalForm from "@/components/aval/aval-form"
-import { CHECK_DATA_MESSAGE, RETRY_MESSAGE, submitAnswer } from "@/components/aval/answer"
+import { BUSY_MESSAGE, CHECK_DATA_MESSAGE, RETRY_MESSAGE, submitAnswer } from "@/components/aval/answer"
 import { formatTimeLeft } from "@/components/aval/format"
 import AvalPage, { dynamic as avalDynamic, metadata as avalMetadata } from "@/app/aval/[token]/page"
 import AvalPreviewPage from "@/app/dev/aval/[estado]/page"
@@ -234,6 +234,13 @@ describe("answers", () => {
     }
   })
 
+  it("busy keeps the form open with a retry, never the closed screen", async () => {
+    const send = vi.fn().mockResolvedValueOnce({ ok: false, code: "busy" })
+    const outcome = await submitAnswer("tok", "accept", data, send)
+    expect(outcome).toEqual({ kind: "form", fieldErrors: {}, message: BUSY_MESSAGE, retry: true })
+    expect(BUSY_MESSAGE).not.toMatch(/ya no es necesario/i)
+  })
+
   it("unavailable and network errors keep the form with a retry", async () => {
     const send = vi.fn().mockResolvedValueOnce({ ok: false, code: "unavailable" })
     expect(await submitAnswer("tok", "reject", data, send)).toEqual({
@@ -328,6 +335,7 @@ describe("pages", () => {
       "tras-revisar-datos": "No pudimos confirmar tus datos",
       "tras-cerrado": "Esta solicitud ya se resolvió",
       "tras-error": "Intentar de nuevo",
+      "tras-ocupado": "Estamos registrando otra respuesta",
     }
     for (const estado of PREVIEW_STATES) {
       const el = (await AvalPreviewPage({ params: Promise.resolve({ estado }) })) as ReactElement
