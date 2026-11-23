@@ -5,8 +5,8 @@ import { devToolsEnabled, isTestAuthorization, noStore, notFound } from "../../_
 
 /**
  * Development only: status of a TEST-AVALES-* request and of its guarantors, for the e2e tests.
- * GET /dev/avales/api/estado?auth=TEST-AVALES-<id>. Returns statuses only: no names, DPI, phones or
- * tokens.
+ * GET /dev/avales/api/estado?auth=TEST-AVALES-<id>. Returns statuses (and the answer lock) only: no
+ * names, DPI, phones or tokens.
  */
 export const dynamic = "force-dynamic"
 
@@ -42,6 +42,8 @@ export async function GET(request: Request) {
           position: g.fields.position ?? null,
           status: g.fields.status ?? null,
           renapResult: g.fields["renap-result"] ?? null,
+          // Answer lock (`<id>@<ms>`), to diagnose concurrent answers. No personal data.
+          answerClaim: (g.fields["answer-claim"] as string | undefined) || null,
         }))
         .sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
     },
