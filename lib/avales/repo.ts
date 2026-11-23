@@ -114,9 +114,14 @@ function requestFields(input: ParsedGuarantorRequest, expiresAt: string) {
   }
 }
 
-/** First word of the applicant's name: the only applicant data a guarantor sees. */
+/** Applicant's full name, trimmed and with single spaces: what the guarantor sees. */
+export function displayName(fullName: string | undefined): string {
+  return (fullName ?? "").trim().replace(/\s+/g, " ")
+}
+
+/** First word of the applicant's name (kept for `applicantFirstName`). */
 export function firstName(fullName: string | undefined): string {
-  return (fullName ?? "").trim().split(/\s+/)[0] ?? ""
+  return displayName(fullName).split(" ")[0] ?? ""
 }
 
 /**
@@ -132,6 +137,7 @@ export function resolveView(
   const r = request.fields
   const expiresAt = r["expires-at"] ?? ""
   const base = {
+    applicantName: displayName(r["full-name"]),
     applicantFirstName: firstName(r["full-name"]),
     amount: r["requested-amount"] ?? 0,
     expiresAt,

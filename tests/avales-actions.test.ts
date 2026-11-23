@@ -169,7 +169,7 @@ describe("getGuarantorView", () => {
     const token = generateToken()
     const g = fake.rows("guarantors")[0]
     g.fields["token-hash"] = hashToken(token)
-    expect(await getGuarantorView(token)).toMatchObject({ screen: "form", applicantFirstName: "Solicitante", amount: 1000 })
+    expect(await getGuarantorView(token)).toMatchObject({ screen: "form", applicantName: "Solicitante De Prueba", applicantFirstName: "Solicitante", amount: 1000 })
     expect(await getGuarantorView(generateToken())).toEqual({ screen: "invalid" })
     expectNoPiiInLogs([token])
   })

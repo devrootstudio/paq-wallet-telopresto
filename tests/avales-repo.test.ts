@@ -311,7 +311,7 @@ describe("view", () => {
     const ctx = setup()
     const req = ctx.fake.seed("requests", {
       authorization: "TEST-AVALES-unit-0001",
-      "full-name": "Solicitante De Prueba",
+      "full-name": "  María José   De Prueba Ficticia ",
       "requested-amount": 1000,
       status: opts.request ?? "pending_guarantors",
       "expires-at": opts.expiresAt ?? "2026-11-24T12:00:00.000Z",
@@ -331,7 +331,13 @@ describe("view", () => {
     return { ...ctx, token }
   }
 
-  const base = { applicantFirstName: "Solicitante", amount: 1000, expiresAt: "2026-11-24T12:00:00.000Z" }
+  // Every screen except `invalid` carries the applicant's full name (trimmed) and the first name.
+  const base = {
+    applicantName: "María José De Prueba Ficticia",
+    applicantFirstName: "María",
+    amount: 1000,
+    expiresAt: "2026-11-24T12:00:00.000Z",
+  }
 
   it("form: open guarantor on an open request, with only its own data", async () => {
     const { repo, token } = await seeded()
@@ -344,6 +350,20 @@ describe("view", () => {
     })
     expect(JSON.stringify(view)).not.toContain("Aval Dos")
     expect(JSON.stringify(view)).not.toContain(PII.phones[1])
+  })
+
+  it("shows the applicant's full name on every screen, and still nothing from other guarantors", async () => {
+    for (const opts of [{}, { guarantor: "authorized" }, { request: "quorum" }, { request: "expired", guarantor: "expired" }]) {
+      const { repo, token } = await seeded(opts)
+      const view = await repo.view(token)
+      expect(view).toMatchObject({ applicantName: "María José De Prueba Ficticia", applicantFirstName: "María" })
+      const json = JSON.stringify(view)
+      expect(json).not.toContain("Aval Dos")
+      expect(json).not.toContain(PII.phones[1])
+      // No applicant contact data either: only the name and the amount.
+      expect(json).not.toContain(PII.applicantPhone)
+      expect(json).not.toContain(PII.applicantDpi)
+    }
   })
 
   it("form with identityMismatch after a RENAP mismatch; pending also shows the form", async () => {
