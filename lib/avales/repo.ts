@@ -86,6 +86,8 @@ export interface GuarantorFields {
   "renap-raw"?: string
   evidence?: string
   "guarantor-leads"?: string[]
+  /** `<attempt>@<epoch ms>` while an answer is being processed (lib/avales/answer.ts). */
+  "answer-claim"?: string
 }
 
 export interface SubmitOutcome {

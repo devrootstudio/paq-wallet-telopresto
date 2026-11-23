@@ -40,6 +40,8 @@ function world(opts: { requestStatus?: string; expiresAt?: string; renap?: Renap
     airtable: createAirtableClient({ token: "t", baseId: "appTEST0000000000", fetch: fake.fetch }),
     renap: opts.renap === undefined ? simulatedRenap : opts.renap,
     now: () => NOW,
+    claimSettleMs: 10,
+    clock: () => 0, // elapsed-time abort is tested on its own
   }
   const g = (position: number) => fake.rows("guarantors").find((r) => r.fields.position === position)!
   return { fake, deps, tokens, g }
@@ -133,6 +135,76 @@ describe("answerGuarantor: accept", () => {
       { ok: true, status: "authorized" },
     ])
     expect([g(1).fields.status, g(2).fields.status]).toEqual(["authorized", "authorized"])
+  })
+})
+
+describe("answerGuarantor: one answer at a time per guarantor (answer-claim)", () => {
+  const evidenceWrites = (fake: ReturnType<typeof createFakeAirtable>) =>
+    fake.calls.filter((c) => c.method === "PATCH" && (c.body ?? "").includes('"evidence"')).length
+
+  it("two simultaneous accepts from two tabs: one RENAP call, one evidence, the other gets closed", async () => {
+    const renap = vi.fn(simulatedRenap)
+    const { deps, tokens, g, fake } = world({ renap })
+    const results = await Promise.all([
+      answerGuarantorWith(deps, tokens[0], "accept", accept(), META),
+      answerGuarantorWith(deps, tokens[0], "accept", accept(), { ...META, userAgent: "OtherTab/2.0" }),
+    ])
+    expect(results).toContainEqual({ ok: true, status: "authorized" })
+    expect(results).toContainEqual({ ok: false, code: "closed" })
+    expect(renap).toHaveBeenCalledTimes(1)
+    expect(evidenceWrites(fake)).toBe(1)
+    expect(g(1).fields.status).toBe("authorized")
+  })
+
+  it("accept and reject at the same moment: exactly one is recorded", async () => {
+    const { deps, tokens, g, fake } = world()
+    const results = await Promise.all([
+      answerGuarantorWith(deps, tokens[0], "accept", accept(), META),
+      answerGuarantorWith(deps, tokens[0], "reject", blank, META),
+    ])
+    expect(results.filter((r) => r.ok)).toHaveLength(1)
+    expect(results.filter((r) => !r.ok)).toEqual([{ ok: false, code: "closed" }])
+    expect(evidenceWrites(fake)).toBe(1)
+    expect(["authorized", "rejected"]).toContain(g(1).fields.status)
+  })
+
+  it("a RENAP error frees the claim so the guarantor can retry right away", async () => {
+    const { deps, tokens, g } = world()
+    expect(await answerGuarantorWith(deps, tokens[0], "accept", accept("1234567899999"), META)).toEqual({ ok: false, code: "unavailable" })
+    expect(g(1).fields["answer-claim"]).toBe("")
+    expect(await answerGuarantorWith(deps, tokens[0], "accept", accept(), META)).toEqual({ ok: true, status: "authorized" })
+  })
+
+  it("an identity mismatch frees the claim; an authorized answer keeps it", async () => {
+    const { deps, tokens, g } = world()
+    await answerGuarantorWith(deps, tokens[0], "accept", accept("1234567890000"), META)
+    expect(g(1).fields["answer-claim"]).toBe("")
+    await answerGuarantorWith(deps, tokens[0], "accept", accept(), META)
+    expect(g(1).fields["answer-claim"]).toMatch(/@\d+$/)
+  })
+
+  it("an answer in progress blocks another; a claim past its lease can be taken over", async () => {
+    const { deps, tokens, g } = world()
+    g(1).fields["answer-claim"] = `other@${NOW.getTime() - 1000}`
+    expect(await answerGuarantorWith(deps, tokens[0], "reject", blank, META)).toEqual({ ok: false, code: "closed" })
+    g(1).fields["answer-claim"] = `dead@${NOW.getTime() - 121_000}`
+    expect(await answerGuarantorWith(deps, tokens[0], "reject", blank, META)).toEqual({ ok: true, status: "rejected" })
+  })
+
+  it("a claim confirmed too long after the read answers unavailable without calling RENAP", async () => {
+    const renap = vi.fn(simulatedRenap)
+    const w = world({ renap })
+    const reads = [0, 100]
+    const deps = { ...w.deps, clock: () => reads.shift() ?? 100, claimSettleMs: 12 }
+    expect(await answerGuarantorWith(deps, w.tokens[0], "accept", accept(), META)).toEqual({ ok: false, code: "unavailable" })
+    expect(renap).not.toHaveBeenCalled()
+  })
+
+  it("an unexpected failure after claiming frees the claim", async () => {
+    const renap = vi.fn(async () => Promise.reject(new Error("boom")))
+    const { deps, tokens, g } = world({ renap })
+    await expect(answerGuarantorWith(deps, tokens[0], "accept", accept(), META)).rejects.toThrow("boom")
+    expect(g(1).fields["answer-claim"]).toBe("")
   })
 })
 

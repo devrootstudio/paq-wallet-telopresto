@@ -72,7 +72,7 @@ async function world() {
   const run = (extra: Partial<JobDeps> = {}) => runGuarantorJob(deps(extra))
   const answer = (token: string, a: "accept" | "reject", position: number) =>
     answerGuarantorWith(
-      { airtable, renap: simulatedRenap, now: () => now },
+      { airtable, renap: simulatedRenap, now: () => now, claimSettleMs: 10, clock: () => 0 },
       token,
       a,
       a === "accept"
