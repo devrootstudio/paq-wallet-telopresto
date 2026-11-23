@@ -1,10 +1,13 @@
 /**
  * WhatsApp messages of the guarantor route (contract §8). Server-side only.
  *
- * PENDING: the n8n Wa2Desk integration and the Meta-approved templates. For now every send is simulated: it returns
- * success without contacting anyone, so the job can move statuses and store `invited-at` /
- * `thanked-at` end to end. Replace `simulatedSender` with the real n8n call when the templates are
- * approved; the job only depends on the `WhatsAppSender` interface.
+ * PENDING: the n8n Wa2Desk integration and the Meta-approved templates.
+ * - In simulation (test bypass, development/test) every send is simulated and succeeds, so the job
+ *   can move statuses and store `invited-at` / `thanked-at` end to end.
+ * - Outside simulation nothing can be sent yet: the sender is not ready and every send fails, so
+ *   guarantors stay `pending` (no link is issued) and notices are reported as not sent.
+ * Replace `notIntegratedSender` with the real n8n call when the templates are approved; the job only
+ * depends on the `WhatsAppSender` interface.
  *
  * Privacy: never log the phone in full, the variables (they hold names and the link token) or
  * the provider response.
@@ -33,14 +36,33 @@ export interface WhatsAppMessage {
 
 export type WhatsAppResult = { ok: true; simulated: boolean } | { ok: false; reason: string }
 
-export type WhatsAppSender = (message: WhatsAppMessage) => Promise<WhatsAppResult>
+export type WhatsAppSender = ((message: WhatsAppMessage) => Promise<WhatsAppResult>) & {
+  /** false when no message can be sent at all: the job then issues no invitation links. */
+  ready?: boolean
+}
 
 export function maskPhone(phone: string): string {
   return phone.length >= 4 ? `****${phone.slice(-4)}` : "****"
 }
 
-/** Always succeeds. Pending: the n8n Wa2Desk integration and the Meta-approved templates. */
-export const simulatedSender: WhatsAppSender = async (message) => {
-  console.info(`[avales] whatsapp simulated: ${message.template} to ${maskPhone(message.to)}`)
-  return { ok: true, simulated: true }
+/** Simulation only: always succeeds without contacting anyone. */
+export const simulatedSender: WhatsAppSender = Object.assign(
+  async (message: WhatsAppMessage): Promise<WhatsAppResult> => {
+    console.info(`[avales] whatsapp simulated: ${message.template} to ${maskPhone(message.to)}`)
+    return { ok: true, simulated: true }
+  },
+  { ready: true },
+)
+
+/** Outside simulation until the n8n integration exists: never sends, always reports why. */
+export const notIntegratedSender: WhatsAppSender = Object.assign(
+  async (message: WhatsAppMessage): Promise<WhatsAppResult> => {
+    console.warn(`[avales] whatsapp NOT SENT (${message.template}): n8n Wa2Desk integration pending`)
+    return { ok: false, reason: "whatsapp_not_integrated" }
+  },
+  { ready: false },
+)
+
+export function whatsappSender(simulation: boolean): WhatsAppSender {
+  return simulation ? simulatedSender : notIntegratedSender
 }

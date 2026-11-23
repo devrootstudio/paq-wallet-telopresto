@@ -3,7 +3,7 @@ import { AIRTABLE_TIMEOUT_MS, isRecordId, type AirtableClient, type AirtableReco
 import { generarPagare, type PagareInput } from "@/lib/pagare"
 import { isDisbursed, releaseRequest, type ReleaseResult, type ReleaseStore } from "@/lib/release"
 import { validateCupo } from "@/lib/soap-client"
-import { createAvalesRepo, TABLES, type GuarantorFields, type GuarantorStatus, type RequestFields, type RequestStatus } from "./repo"
+import { createAvalesRepo, isTestRequest, TABLES, type GuarantorFields, type GuarantorStatus, type RequestFields, type RequestStatus } from "./repo"
 import { simulatedCupo } from "./runtime"
 import type { WhatsAppSender } from "./whatsapp"
 
@@ -37,9 +37,10 @@ import type { WhatsAppSender } from "./whatsapp"
 const OPEN_GUARANTOR: GuarantorStatus[] = ["pending", "invited", "identity_mismatch"]
 
 /**
- * Pause between writing a release claim and re-reading it. Longer than an Airtable request may
- * take (a claim write that times out makes its run abort), so a slow concurrent claim write has
- * always landed before the re-read.
+ * Pause between writing a release claim and re-reading it. Longer than one Airtable request may
+ * take (AIRTABLE_TIMEOUT_MS; the claim write is never retried on a 429, and a claim write that
+ * fails or times out makes its run abort). The guarantee is completed by the elapsed-time rule in
+ * `releaseOne`: a run whose read-to-confirmed-claim takes more than half this pause does not release.
  */
 export const CLAIM_SETTLE_MS = AIRTABLE_TIMEOUT_MS + 2000
 
@@ -232,18 +233,27 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
   }
   const nowIso = () => now().toISOString()
   const getRequest = (id: string) => airtable.get<RequestFields>(TABLES.requests, id)
+  // Local and production share one base: a simulation run only touches test requests, a real run
+  // only real ones (see isTestRequest).
+  const inMode = (r: RequestFields | undefined | null) => !!r && isTestRequest(r) === deps.simulation
+  const requestCache = new Map<string, Promise<AirtableRecord<RequestFields> | null>>()
+  const requestOf = (id: string | undefined) => {
+    if (!id || !isRecordId(id)) return Promise.resolve(null)
+    if (!requestCache.has(id)) requestCache.set(id, getRequest(id))
+    return requestCache.get(id)!
+  }
   const notifyApplicant = async (request: AirtableRecord<RequestFields>, template: "request_rejected" | "request_expired" | "request_not_approved") => {
     const res = await whatsapp({ template, to: request.fields.phone ?? "", variables: { name: request.fields["full-name"] ?? "" } })
     if (!res.ok) fail("notify", request.id, new Error(res.reason))
   }
 
-  // 1. Invite.
-  for (const listed of await airtable.list<GuarantorFields>(TABLES.guarantors, { filterByFormula: `{status} = 'pending'` })) {
+  // 1. Invite. Without a working WhatsApp no link is issued: guarantors stay `pending`.
+  const pending = whatsapp.ready === false ? [] : await airtable.list<GuarantorFields>(TABLES.guarantors, { filterByFormula: `{status} = 'pending'` })
+  if (whatsapp.ready === false) console.warn("[avales] job: WhatsApp not integrated; invitations skipped (guarantors stay pending)")
+  for (const listed of pending) {
     try {
-      const rid = listed.fields.request?.[0]
-      if (!rid || !isRecordId(rid)) continue
-      const request = await getRequest(rid)
-      if (!request || !repo.isOpen(request)) continue
+      const request = await requestOf(listed.fields.request?.[0])
+      if (!request || !inMode(request.fields) || !repo.isOpen(request)) continue
       // Re-read: another run may have invited it since the list was taken.
       const g = await airtable.get<GuarantorFields>(TABLES.guarantors, listed.id)
       if (g?.fields.status !== "pending") continue
@@ -273,27 +283,35 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
   }
 
   // 2–4. Rejections, quorum, expiry.
+  type Next = { request: RequestStatus; guarantors: GuarantorStatus; extra?: Record<string, unknown> }
+  const decide = async (requestId: string, pastDeadline: boolean) => {
+    const rows = (await repo.guarantorsOf(requestId)).filter((g) => g.fields.status && g.fields.status !== "closed")
+    const count = (s: GuarantorStatus) => rows.filter((g) => g.fields.status === s).length
+    const open = rows.filter((g) => OPEN_GUARANTOR.includes(g.fields.status!))
+    // Quorum needs two *different* people: authorized guarantors are counted by distinct DPI, so two
+    // links confirmed with the same DPI at the same moment never make a quorum (no self-guarantee).
+    const authorizedPeople = new Set(rows.filter((g) => g.fields.status === "authorized").map((g) => g.fields.identification || g.id))
+    let next: Next | null = null
+    if (count("rejected") >= 2) next = { request: "rejected", guarantors: "closed" }
+    else if (authorizedPeople.size >= 2) next = { request: "quorum", guarantors: "closed", extra: { "quorum-at": nowIso() } }
+    else if (pastDeadline) next = { request: "expired", guarantors: "expired" }
+    return { rows, open, next }
+  }
+
   for (const listed of await airtable.list<RequestFields>(TABLES.requests, { filterByFormula: `{status} = 'pending_guarantors'` })) {
+    if (!inMode(listed.fields)) continue
     try {
-      const rows = (await repo.guarantorsOf(listed.id)).filter((g) => g.fields.status && g.fields.status !== "closed")
-      const count = (s: GuarantorStatus) => rows.filter((g) => g.fields.status === s).length
-      const open = rows.filter((g) => OPEN_GUARANTOR.includes(g.fields.status!))
-
-      // Re-read right before writing: act only if it is still waiting for guarantors.
-      const r = await getRequest(listed.id)
-      if (!r || r.fields.status !== "pending_guarantors" || everClaimed(r.fields)) continue
-      const deadline = Date.parse(r.fields["expires-at"] ?? "")
+      const deadline = Date.parse(listed.fields["expires-at"] ?? "")
       const pastDeadline = Number.isNaN(deadline) || now().getTime() >= deadline
-
-      // Quorum needs two *different* people: authorized guarantors are counted by distinct DPI, so two
-      // links confirmed with the same DPI at the same moment never make a quorum (no self-guarantee).
-      const authorizedPeople = new Set(rows.filter((g) => g.fields.status === "authorized").map((g) => g.fields.identification || g.id))
-
-      let next: { request: RequestStatus; guarantors: GuarantorStatus; extra?: Record<string, unknown> } | null = null
-      if (count("rejected") >= 2) next = { request: "rejected", guarantors: "closed" }
-      else if (authorizedPeople.size >= 2) next = { request: "quorum", guarantors: "closed", extra: { "quorum-at": nowIso() } }
-      else if (pastDeadline) next = { request: "expired", guarantors: "expired" }
+      let { rows, open, next } = await decide(listed.id, pastDeadline)
       if (!next) continue
+      // Expiring closes every open guarantor: re-read them right before, in case one just answered.
+      if (next.request === "expired") ({ rows, open, next } = await decide(listed.id, pastDeadline))
+      if (!next) continue
+
+      // Re-read the request last, right before writing: act only if it is still waiting for guarantors.
+      const r = await getRequest(listed.id)
+      if (!r || r.fields.status !== "pending_guarantors" || everClaimed(r.fields) || !inMode(r.fields)) continue
 
       // Guarantors first: if the request write fails, the next run sees the same counts and retries.
       if (open.length > 0) {
@@ -319,6 +337,7 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
   // middle of a release (each release waits CLAIM_SETTLE_MS). The rest wait for the next run.
   const releaseStart = clock()
   for (const q of await airtable.list<RequestFields>(TABLES.requests, { filterByFormula: `{status} = 'quorum'` })) {
+    if (!inMode(q.fields)) continue
     if (everClaimed(q.fields)) {
       // In quorum but a release already started: inconsistent, needs a human. Never released again.
       report.stuck.push(q.id)
@@ -355,7 +374,8 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
     const readAt = clock()
     const current = await getRequest(id)
     if (current?.fields.status !== "quorum" || everClaimed(current.fields)) return skipped
-    await airtable.update(TABLES.requests, [{ id, fields: { status: "releasing" satisfies RequestStatus, "release-claim": report.runId } }])
+    // Never retried on a 429: a delayed claim write would only make this run step back below.
+    await airtable.update(TABLES.requests, [{ id, fields: { status: "releasing" satisfies RequestStatus, "release-claim": report.runId } }], { rateLimitRetries: 0 })
     if (clock() - readAt > settle / 2) {
       console.warn(`[avales] job release claim too slow for ${id}; not releasing (left in releasing)`)
       return skipped
@@ -363,7 +383,7 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
     await sleep(settle)
     const ownsClaim = async () => {
       const fresh = (await getRequest(id))?.fields
-      return fresh?.["release-claim"] === report.runId && !fresh["release-code"] && !fresh["released-at"]
+      return fresh?.status === "releasing" && fresh["release-claim"] === report.runId && !fresh["release-code"] && !fresh["released-at"]
     }
     if (!(await ownsClaim())) return skipped
 
@@ -444,6 +464,7 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
   for (const g of await airtable.list<GuarantorFields>(TABLES.guarantors, { filterByFormula: `{status} = 'authorized'` })) {
     if ((g.fields["guarantor-leads"] ?? []).length > 0) continue
     try {
+      if (!inMode((await requestOf(g.fields.request?.[0]))?.fields)) continue
       const evidence = parseJson<{ officialName?: string | null }>(g.fields.evidence)
       await airtable.upsert(
         TABLES.leads,
@@ -465,12 +486,12 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
       fail("lead", g.id, error)
     }
   }
-  for (const listed of await airtable.list<{ phone?: string; "official-name"?: string; "thanked-at"?: string }>(TABLES.leads, {
-    filterByFormula: `{thanked-at} = BLANK()`,
-  })) {
+  type LeadFields = { phone?: string; "official-name"?: string; "thanked-at"?: string; request?: string[] }
+  for (const listed of await airtable.list<LeadFields>(TABLES.leads, { filterByFormula: `{thanked-at} = BLANK()` })) {
     try {
+      if (!inMode((await requestOf(listed.fields.request?.[0]))?.fields)) continue
       // Re-read: another run may have thanked it since the list was taken.
-      const lead = await airtable.get<{ phone?: string; "official-name"?: string; "thanked-at"?: string }>(TABLES.leads, listed.id)
+      const lead = await airtable.get<LeadFields>(TABLES.leads, listed.id)
       if (!lead || lead.fields["thanked-at"]) continue
       const sent = await whatsapp({ template: "guarantor_thanks", to: lead.fields.phone ?? "", variables: { name: lead.fields["official-name"] ?? "" } })
       if (!sent.ok) {

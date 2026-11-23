@@ -3,7 +3,7 @@ import { timingSafeEqual } from "crypto"
 import { airtableFromEnv } from "@/lib/airtable"
 import { runGuarantorJob, type JobReport } from "@/lib/avales/job"
 import { isSimulation, jobsSecret } from "@/lib/avales/runtime"
-import { simulatedSender } from "@/lib/avales/whatsapp"
+import { whatsappSender } from "@/lib/avales/whatsapp"
 
 /**
  * Guarantor job (contract §7). Called every 5 minutes by a scheduled workflow with
@@ -50,8 +50,8 @@ export async function POST(request: Request) {
 
   running = runGuarantorJob({
     airtable,
-    // Pending: the n8n Wa2Desk integration and the Meta-approved templates.
-    whatsapp: simulatedSender,
+    // Simulated in simulation; outside it nothing is sent until the n8n Wa2Desk integration exists.
+    whatsapp: whatsappSender(simulation),
     baseUrl: baseUrl.replace(/\/+$/, ""),
     simulation,
   })

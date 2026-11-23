@@ -10,6 +10,13 @@ const NOW = new Date("2026-11-23T12:00:00.000Z")
 const OPEN = "2026-11-25T12:00:00.000Z"
 const META = { ip: "203.0.113.7", userAgent: "TestAgent/1.0" }
 
+/** The losing answer of a race: `busy` while the other runs, `closed` once it finished. Exactly one. */
+function loserCode(results: { ok: boolean; code?: string }[]): string {
+  const losers = results.filter((r) => !r.ok)
+  expect(losers).toHaveLength(1)
+  return String(losers[0].code)
+}
+
 function world(opts: { requestStatus?: string; expiresAt?: string; renap?: RenapChecker | null } = {}) {
   const fake = createFakeAirtable({ now: () => NOW })
   const req = fake.seed("requests", {
@@ -82,6 +89,7 @@ describe("answerGuarantor: accept", () => {
     expect(JSON.parse(f.evidence as string)).toMatchObject({
       answer: "accept",
       ...META,
+      acceptedText: DECLARATION_TEXT,
       declarationVersion: DECLARATION_VERSION,
       declarationSha256: DECLARATION_SHA256,
       officialName: "AVAL UNO CONFIRMADO",
@@ -150,7 +158,7 @@ describe("answerGuarantor: one answer at a time per guarantor (answer-claim)", (
       answerGuarantorWith(deps, tokens[0], "accept", accept(), { ...META, userAgent: "OtherTab/2.0" }),
     ])
     expect(results).toContainEqual({ ok: true, status: "authorized" })
-    expect(results).toContainEqual({ ok: false, code: "closed" })
+    expect(loserCode(results)).toMatch(/^(busy|closed)$/)
     expect(renap).toHaveBeenCalledTimes(1)
     expect(evidenceWrites(fake)).toBe(1)
     expect(g(1).fields.status).toBe("authorized")
@@ -163,7 +171,7 @@ describe("answerGuarantor: one answer at a time per guarantor (answer-claim)", (
       answerGuarantorWith(deps, tokens[0], "reject", blank, META),
     ])
     expect(results.filter((r) => r.ok)).toHaveLength(1)
-    expect(results.filter((r) => !r.ok)).toEqual([{ ok: false, code: "closed" }])
+    expect(loserCode(results)).toMatch(/^(busy|closed)$/)
     expect(evidenceWrites(fake)).toBe(1)
     expect(["authorized", "rejected"]).toContain(g(1).fields.status)
   })
@@ -189,7 +197,7 @@ describe("answerGuarantor: one answer at a time per guarantor (answer-claim)", (
   it("an answer in progress blocks another; a claim past its lease can be taken over", async () => {
     const { deps, tokens, g } = world()
     g(1).fields["answer-claim"] = `other@${NOW.getTime() - 1000}`
-    expect(await answerGuarantorWith(deps, tokens[0], "reject", blank, META)).toEqual({ ok: false, code: "closed" })
+    expect(await answerGuarantorWith(deps, tokens[0], "reject", blank, META)).toEqual({ ok: false, code: "busy" })
     g(1).fields["answer-claim"] = `dead@${NOW.getTime() - 121_000}`
     expect(await answerGuarantorWith(deps, tokens[0], "reject", blank, META)).toEqual({ ok: true, status: "rejected" })
   })
@@ -231,7 +239,7 @@ describe("answerGuarantor: one answer at a time per guarantor (answer-claim)", (
         answerGuarantorWith(w.deps, w.tokens[0], "accept", accept(), META),
       ])
       expect(results).toContainEqual({ ok: true, status: "authorized" })
-      expect(results).toContainEqual({ ok: false, code: "closed" })
+      expect(loserCode(results)).toMatch(/^(busy|closed)$/)
       expect(w.renap).toHaveBeenCalledTimes(1)
       expect(w.g(1).fields.status).toBe("authorized")
     }, 40_000)
@@ -244,7 +252,7 @@ describe("answerGuarantor: one answer at a time per guarantor (answer-claim)", (
       ])
       const recorded = results.filter((r) => r.ok)
       expect(recorded).toHaveLength(1)
-      expect(results.filter((r) => !r.ok)).toEqual([{ ok: false, code: "closed" }])
+      expect(loserCode(results)).toMatch(/^(busy|closed)$/)
       expect(w.g(1).fields.status).toBe((recorded[0] as { status: string }).status)
     }, 40_000)
   })

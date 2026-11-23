@@ -24,8 +24,8 @@ afterEach(() => {
 const call = (auth?: string) =>
   POST(new Request("http://localhost:3020/api/jobs/guarantors", { method: "POST", headers: auth ? { Authorization: auth } : {} }))
 
-function seedPendingGuarantor() {
-  const req = fake.seed("requests", { authorization: "TEST-AVALES-route", status: "pending_guarantors", "expires-at": "2999-01-01T00:00:00.000Z", phone: "55559999" })
+function seedPendingGuarantor(authorization = "TEST-AVALES-route") {
+  const req = fake.seed("requests", { authorization, status: "pending_guarantors", "expires-at": "2999-01-01T00:00:00.000Z", phone: "55559999" })
   fake.seed("guarantors", { slot: `${req.id}:1`, request: [req.id], position: 1, phone: "55550001", status: "pending" })
 }
 
@@ -72,15 +72,16 @@ describe("POST /api/jobs/guarantors", () => {
     expect(body.links[0].url).toMatch(/^https:\/\/app\.example\/aval\//)
   })
 
-  it("in production with the bypass on: no development secret, and never links", async () => {
+  it("in production with the bypass on: no development secret, no links, and no invitation while WhatsApp is not integrated", async () => {
     vi.stubEnv("ENABLE_TEST_BYPASS", "true")
     vi.stubEnv("NODE_ENV", "production")
-    seedPendingGuarantor()
+    seedPendingGuarantor("REAL-route-0001")
     expect((await call(`Bearer ${DEV_JOBS_SECRET}`)).status).toBe(503)
     vi.stubEnv("JOBS_SECRET", "prod-secret")
     vi.stubEnv("APP_BASE_URL", "https://app.example")
     const body = await (await call("Bearer prod-secret")).json()
-    expect(body).toMatchObject({ ok: true, simulation: false, invited: 1 })
+    expect(body).toMatchObject({ ok: true, simulation: false, invited: 0 })
+    expect(fake.rows("guarantors")[0].fields.status).toBe("pending")
     expect(body.links).toBeUndefined()
   })
 
