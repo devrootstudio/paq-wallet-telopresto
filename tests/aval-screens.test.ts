@@ -4,19 +4,20 @@ import { renderToStaticMarkup } from "react-dom/server"
 
 vi.mock("@/app/avales-actions", () => ({
   getGuarantorView: vi.fn(),
-  answerGuarantor: vi.fn(async () => ({ ok: false, code: "not_available" })),
+  answerGuarantor: vi.fn(async () => ({ ok: false, code: "unavailable" })),
 }))
 
 import { answerGuarantor, getGuarantorView } from "@/app/avales-actions"
 import AvalScreen, { applicantInitials } from "@/components/aval/aval-screen"
 import AvalError from "@/components/aval/aval-error"
 import AvalForm from "@/components/aval/aval-form"
-import { CHECK_DATA_MESSAGE, NOT_AVAILABLE_MESSAGE, RETRY_MESSAGE, submitAnswer } from "@/components/aval/answer"
+import { CHECK_DATA_MESSAGE, RETRY_MESSAGE, submitAnswer } from "@/components/aval/answer"
 import { formatTimeLeft } from "@/components/aval/format"
 import AvalPage, { dynamic as avalDynamic, metadata as avalMetadata } from "@/app/aval/[token]/page"
 import AvalPreviewPage from "@/app/dev/aval/[estado]/page"
 import { PREVIEW_STATES, previewView } from "@/app/dev/aval/[estado]/fixtures"
 import type { GuarantorView } from "@/lib/avales/types"
+import { DECLARATION_TEXT } from "@/lib/avales/declaration"
 
 const m = (fn: unknown) => fn as ReturnType<typeof vi.fn>
 
@@ -45,7 +46,8 @@ describe("/aval/<token> screens", () => {
     expect(html).toContain('value="Carlos Ejemplo Prueba"')
     expect(html).toContain('value="1000 00000 0101"')
     expect(html).toContain('value="1000 0001"')
-    expect(html).toContain(`Conozco a ${FULL_NAME} y acepto avalar`)
+    expect(html).toContain(`Conozco a ${FULL_NAME} y acepto la declaración`)
+    expect(html).toContain(DECLARATION_TEXT)
     expect(html).toContain(`Si no reconoces a ${FULL_NAME}`)
     expect(html).toContain(">Avalar<")
     expect(html).toContain(">Rechazar<")
@@ -74,9 +76,9 @@ describe("/aval/<token> screens", () => {
   it("form with identity mismatch asks to check the data", () => {
     const html = render({ ...base, screen: "form", guarantor, identityMismatch: true })
     expect(html).toContain("No pudimos confirmar tus datos")
-    // Never what the official registry returned
-    expect(html).not.toContain("RENAP")
+    // Never what the official registry returned (the declaration itself names RENAP, as consent)
     expect(html).not.toContain("registro oficial")
+    expect(html).not.toContain("no coincid")
   })
 
   it("answered: authorized and rejected", () => {
@@ -174,13 +176,21 @@ describe("/aval/<token> screens", () => {
 describe("answers", () => {
   const data = { fullName: guarantor.fullName, identification: guarantor.identification, phone: guarantor.phone }
 
-  it("accept and reject reach answerGuarantor; the stub shows the friendly not-available message", async () => {
-    for (const answer of ["accept", "reject"] as const) {
-      const outcome = await submitAnswer("tok", answer, data)
-      expect(outcome).toEqual({ kind: "form", fieldErrors: {}, message: NOT_AVAILABLE_MESSAGE })
-    }
-    expect(answerGuarantor).toHaveBeenCalledWith("tok", "accept", data)
-    expect(answerGuarantor).toHaveBeenCalledWith("tok", "reject", data)
+  it("accept sends the confirmed data and the declaration; reject sends nothing personal", async () => {
+    await submitAnswer("tok", "accept", { ...data, phone: "+502 1000 0001" })
+    expect(answerGuarantor).toHaveBeenCalledWith("tok", "accept", {
+      fullName: data.fullName,
+      identification: data.identification,
+      phone: "10000001",
+      acceptedText: DECLARATION_TEXT,
+    })
+    await submitAnswer("tok", "reject", data)
+    expect(answerGuarantor).toHaveBeenLastCalledWith("tok", "reject", { fullName: "", identification: "", phone: "" })
+  })
+
+  it("the deprecated not_available code is treated as a temporary failure with retry", async () => {
+    const send = vi.fn().mockResolvedValueOnce({ ok: false, code: "not_available" })
+    expect(await submitAnswer("tok", "accept", data, send)).toMatchObject({ kind: "form", retry: true })
   })
 
   it("accept with invalid data does not call the server and marks the fields", async () => {

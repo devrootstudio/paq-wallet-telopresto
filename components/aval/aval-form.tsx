@@ -1,9 +1,10 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { DECLARATION_TEXT } from "@/lib/avales/declaration"
 import type { GuarantorAnswer, GuarantorAnswerInput } from "@/lib/avales/types"
 import { cn } from "@/lib/utils"
-import { formatDPI, formatPhone, withoutCountryCode } from "./format"
+import { formatDPI, formatPhone } from "./format"
 import Message from "./message"
 import { EMPTY_OUTCOME as EMPTY, submitAnswer, type AnswerOutcome } from "./answer"
 
@@ -90,12 +91,7 @@ export default function AvalForm({
     setSending(true)
     setLastAnswer(answer)
     try {
-      // The contract ignores the data on reject: do not send it.
-      const payload =
-        answer === "reject"
-          ? { fullName: "", identification: "", phone: "" }
-          : { ...data, phone: withoutCountryCode(data.phone) }
-      setOutcome(await submitAnswer(token, answer, payload))
+      setOutcome(await submitAnswer(token, answer, data))
     } finally {
       inFlight.current = false
       setSending(false)
@@ -209,15 +205,24 @@ export default function AvalForm({
 
       {mode === "form" ? (
         <>
+          <section aria-labelledby="aval-declaracion" className="mb-4 rounded-2xl bg-white/5 p-4">
+            <h2 id="aval-declaracion" className="mb-1 text-[13px] font-bold text-white">
+              Declaración del aval
+            </h2>
+            <p id="aval-declaracion-texto" className="text-xs leading-relaxed text-white/80">
+              {DECLARATION_TEXT}
+            </p>
+          </section>
           <label className="mb-5 flex items-start gap-3 text-sm leading-relaxed text-white">
             <input
               type="checkbox"
               checked={accepted}
               onChange={(e) => setAccepted(e.target.checked)}
+              aria-describedby="aval-declaracion-texto"
               disabled={sending}
               className="mt-0.5 h-5 w-5 flex-none rounded accent-paq-light-green"
             />
-            <span>Conozco a {applicantName} y acepto avalar su solicitud de adelanto.</span>
+            <span>Conozco a {applicantName} y acepto la declaración para avalar su solicitud de adelanto.</span>
           </label>
 
           <button

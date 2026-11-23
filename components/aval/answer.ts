@@ -1,6 +1,8 @@
 import { answerGuarantor } from "@/app/avales-actions"
 import { guarantorAnswerSchema, toFieldErrors } from "@/lib/avales/schema"
+import { DECLARATION_TEXT } from "@/lib/avales/declaration"
 import type { AnswerResult, FieldErrors, GuarantorAnswer, GuarantorAnswerInput } from "@/lib/avales/types"
+import { withoutCountryCode } from "./format"
 
 /**
  * Answer logic of /aval/<token>, kept out of the client component so server code (the dev preview)
@@ -22,9 +24,6 @@ export const EMPTY_OUTCOME: AnswerOutcome = { kind: "form", fieldErrors: {}, mes
 export const CHECK_DATA_MESSAGE = "No pudimos confirmar tus datos. Revisa tu nombre, DPI y teléfono e intenta de nuevo."
 export const RETRY_MESSAGE = "No pudimos registrar tu respuesta. Intenta de nuevo en unos minutos."
 
-export const NOT_AVAILABLE_MESSAGE =
-  "Todavía no podemos registrar tu respuesta. Estamos terminando de habilitar esta opción: vuelve a abrir este link más tarde."
-
 function outcomeFor(result: Extract<AnswerResult, { ok: false }>): AnswerOutcome {
   switch (result.code) {
     case "closed":
@@ -33,11 +32,24 @@ function outcomeFor(result: Extract<AnswerResult, { ok: false }>): AnswerOutcome
       return { kind: "ended", screen: result.code }
     case "validation":
       return { kind: "form", fieldErrors: result.fieldErrors ?? {}, message: "Revisa los datos marcados." }
-    case "not_available":
-      return { kind: "form", fieldErrors: {}, message: NOT_AVAILABLE_MESSAGE }
     case "unavailable":
+    // `not_available` is deprecated (former stub): treated as a temporary failure.
     default:
       return { kind: "form", fieldErrors: {}, message: RETRY_MESSAGE, retry: true }
+  }
+}
+
+/**
+ * Builds what goes to the server: nothing personal on `reject` (the contract ignores it); on `accept`,
+ * the confirmed data plus the declaration shown on screen as evidence.
+ */
+export function answerPayload(answer: GuarantorAnswer, data: GuarantorAnswerInput): GuarantorAnswerInput {
+  if (answer === "reject") return { fullName: "", identification: "", phone: "" }
+  return {
+    fullName: data.fullName,
+    identification: data.identification,
+    phone: withoutCountryCode(data.phone),
+    acceptedText: DECLARATION_TEXT,
   }
 }
 
@@ -48,9 +60,10 @@ function outcomeFor(result: Extract<AnswerResult, { ok: false }>): AnswerOutcome
 export async function submitAnswer(
   token: string,
   answer: GuarantorAnswer,
-  data: GuarantorAnswerInput,
+  input: GuarantorAnswerInput,
   send: typeof answerGuarantor = answerGuarantor,
 ): Promise<AnswerOutcome> {
+  const data = answerPayload(answer, input)
   if (answer === "accept") {
     const parsed = guarantorAnswerSchema.safeParse(data)
     if (!parsed.success) {
