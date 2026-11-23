@@ -14,6 +14,7 @@ import { validateSecurityToken } from "@/lib/security-token"
 import { createHash } from "crypto"
 import { generarPagare } from "@/lib/pagare"
 import { releaseRequest } from "@/lib/release"
+import { getRutaAction } from "@/app/avales-actions"
 
 const ENABLE_TEST_BYPASS = process.env.ENABLE_TEST_BYPASS === "true" || process.env.ENABLE_TEST_BYPASS === "1"
 
@@ -944,6 +945,15 @@ export async function submitStep3Form(data: Step3FormData): Promise<ServerAction
     return {
       success: false,
       error: "Unauthorized request",
+      errorType: "disbursement",
+    }
+  }
+
+  // Aval route (contract §1, §7): Step 3 never disburses; only the guarantors job releases money.
+  if ((await getRutaAction()) === "aval") {
+    return {
+      success: false,
+      error: "Esta solicitud requiere avales: el desembolso no se realiza en este paso.",
       errorType: "disbursement",
     }
   }
