@@ -353,17 +353,22 @@ export function createAvalesRepo(deps: AvalesRepoDeps) {
 
   /** The guarantor a link token belongs to and its request, or null for an unknown/malformed token. */
   async function findByToken(token: string) {
-    if (!isWellFormedToken(token)) return null
-    const matches = await airtable.list<GuarantorFields>(TABLES.guarantors, {
-      filterByFormula: `{token-hash} = ${formulaString(hashToken(token))}`,
-      maxRecords: 1,
-    })
-    const guarantor = matches[0]
+    const guarantor = await findGuarantorByToken(token)
     const requestId = guarantor?.fields.request?.[0]
     if (!guarantor || !requestId) return null
     const request = await airtable.get<RequestFields>(TABLES.requests, requestId)
     if (!request) return null
     return { guarantor, request }
+  }
+
+  /** Only the guarantor a link token belongs to (one Airtable call), or null. */
+  async function findGuarantorByToken(token: string) {
+    if (!isWellFormedToken(token)) return null
+    const matches = await airtable.list<GuarantorFields>(TABLES.guarantors, {
+      filterByFormula: `{token-hash} = ${formulaString(hashToken(token))}`,
+      maxRecords: 1,
+    })
+    return matches[0] ?? null
   }
 
   /**
@@ -383,7 +388,7 @@ export function createAvalesRepo(deps: AvalesRepoDeps) {
     return token
   }
 
-  return { submit, view, findByToken, issueGuarantorToken, guarantorsOf, isOpen }
+  return { submit, view, findByToken, findGuarantorByToken, issueGuarantorToken, guarantorsOf, isOpen }
 }
 
 export type AvalesRepo = ReturnType<typeof createAvalesRepo>
