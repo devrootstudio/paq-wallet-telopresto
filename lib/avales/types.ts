@@ -107,7 +107,12 @@ export type SubmitResult =
 
 /** Fields shown on every /aval/<token> screen except `invalid`. Never data from the other guarantors. */
 export interface GuarantorViewBase {
-  /** First name of the applicant only. */
+  /**
+   * Full name of the applicant, trimmed, so the guarantor knows exactly who is asking for support.
+   * The only applicant data a guarantor sees besides the amount.
+   */
+  applicantName: string
+  /** First name of the applicant. Kept for compatibility; prefer `applicantName`. */
   applicantFirstName: string
   /** Requested amount in quetzales. */
   amount: number
