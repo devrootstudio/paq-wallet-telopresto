@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { cookieJar } from "./setup"
 
 // Paq SOAP services, the Make webhook and PDFMonkey are external: mock them at
@@ -259,6 +259,10 @@ describe("step 2 · SMS token (Valida_Token_TyC + valida_cupo)", () => {
 })
 
 describe("step 3 · disbursement (Ejecuta_Desembolso + pagaré)", () => {
+  // The convenio flow is the `normal` route; `aval` (the default) never disburses in Step 3.
+  beforeEach(() => vi.stubEnv("TELOPRESTO_RUTA", "normal"))
+  afterEach(() => vi.unstubAllEnvs())
+
   it("rejects incomplete data without disbursing", async () => {
     const r = await submitStep3Form({ ...step3Data, idSolicitud: "" })
     expect(r).toMatchObject({ success: false, errorType: "disbursement" })
@@ -308,6 +312,17 @@ describe("step 3 · disbursement (Ejecuta_Desembolso + pagaré)", () => {
     expect((await submitStep3Form(step3Data)).success).toBe(false)
     expect((await submitStep3Form(step3Data)).success).toBe(true)
     expect(soap.executeDisbursement).toHaveBeenCalledTimes(2)
+  })
+
+  it("aval route (explicit or by default): rejects without disbursing or generating a pagaré", async () => {
+    m(soap.executeDisbursement).mockResolvedValue({ returnCode: 0 })
+    for (const ruta of ["aval", undefined]) {
+      vi.stubEnv("TELOPRESTO_RUTA", ruta)
+      const r = await submitStep3Form(step3Data)
+      expect(r).toMatchObject({ success: false, errorType: "disbursement" })
+    }
+    expect(soap.executeDisbursement).not.toHaveBeenCalled()
+    expect(generarPagare).not.toHaveBeenCalled()
   })
 
   it("a pagaré that could not be generated leaves pagareUrl empty but the disbursement stands", async () => {

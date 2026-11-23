@@ -7,13 +7,15 @@ import Step0Phone from "@/components/steps/step-0-phone"
 import Step1Form from "@/components/steps/step-1-form"
 import Step2Phone from "@/components/steps/step-2-phone"
 import Step3Approval from "@/components/steps/step-3-approval"
+import Step3bAvales from "@/components/steps/step-3b-avales"
+import Step3cEnRevision from "@/components/steps/step-3c-en-revision"
 import Step4Success from "@/components/steps/step-4-success"
 import Step5Error from "@/components/steps/step-5-error"
 import { DevWizardSeed } from "@/components/dev-wizard-seed"
 import { ClientInfoCollector } from "@/components/client-info-collector"
 
 function HomeInner() {
-  const { step, isLoading } = useWizardStore()
+  const { step, isLoading, avalStage } = useWizardStore()
 
   const renderStep = () => {
     switch (step) {
@@ -24,6 +26,9 @@ function HomeInner() {
       case 2:
         return <Step2Phone />
       case 3:
+        // Aval route: Step 3b (guarantors) and the "en revisión" screen live inside Step 3.
+        if (avalStage === "avales") return <Step3bAvales />
+        if (avalStage === "en-revision") return <Step3cEnRevision />
         return <Step3Approval />
       case 4:
         return <Step4Success />
