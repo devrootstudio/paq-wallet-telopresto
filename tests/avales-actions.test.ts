@@ -89,6 +89,7 @@ describe("submitGuarantorRequest", () => {
   it("stores the request and is safe to resubmit", async () => {
     const first = await submitGuarantorRequest(input())
     const requestId = fake.rows("requests")[0].id
+    expect(fake.rows("requests")[0].fields.test).toBeUndefined() // not in simulation → real request
     expect(first).toEqual({ ok: true, requestId, expiresAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/), requestedAmount: 1000, reused: false, open: true })
     const second = await submitGuarantorRequest(input())
     expect(second).toEqual({ ...first, reused: true })
@@ -197,6 +198,7 @@ describe("answerGuarantor", () => {
     const token = await linkForFirstGuarantor()
     expect(await answerGuarantor(token, "accept", confirm)).toEqual({ ok: true, status: "authorized" })
     expect(fake.rows("guarantors")[0].fields.status).toBe("authorized")
+    expect(fake.rows("requests")[0].fields.test).toBe(true) // created in simulation → test data
     expect(await answerGuarantor(token, "reject", { fullName: "", identification: "", phone: "" })).toEqual({ ok: false, code: "closed" })
     expectNoPiiInLogs([token])
   })

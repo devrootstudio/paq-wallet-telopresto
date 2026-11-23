@@ -20,7 +20,7 @@ import type { AnswerResult, GuarantorAnswer, GuarantorAnswerInput } from "./type
  * One answer per guarantor at a time (`answer-claim`, like the job's release claim):
  * 1. read the guarantor (one call) — it must have no live claim;
  * 2. write our claim; if that read + write took longer than the pause, step back (`unavailable`);
- * 3. wait ANSWER_CLAIM_SETTLE_MS and re-read: only the holder goes on, a concurrent answer gets `closed`;
+ * 3. wait ANSWER_CLAIM_SETTLE_MS and re-read: only the holder goes on, a concurrent answer gets `busy` (or `closed` once the other one finished);
  * 4. the holder checks the claim again before writing the result.
  * Why it is sound: two answers can only both go on if one's claim lands more than the pause after
  * the other's; a claim lands at most "read + write" after its read, and slower answers step back.
@@ -106,7 +106,9 @@ export async function answerGuarantorWith(
   }
   if (answer === "accept" && !deps.renap) return unavailable("identity check not configured")
   const existing = guarantor.fields["answer-claim"]
-  if (existing && !claimExpired(existing, now())) return { ok: false, code: "closed" }
+  // Another answer is in progress: the link is still open, so not `closed` (which would tell the
+  // guarantor their answer is no longer needed).
+  if (existing && !claimExpired(existing, now())) return { ok: false, code: "busy" }
 
   // 2. Claim.
   const claim = `${randomUUID()}@${now().getTime()}`
@@ -145,9 +147,10 @@ export async function answerGuarantorWith(
     await sleep(settle)
     let state = await readState()
     if (!state) return { ok: false, code: "invalid" }
-    if (!holds(state.rows)) return { ok: false, code: "closed" }
+    // If the other answer already finished, the link is closed; if it is still running, `busy`.
     const blocked = linkState(state)
     if (blocked) return blocked
+    if (!holds(state.rows)) return { ok: false, code: "busy" }
 
     const at = now().toISOString()
     const evidence = (extra: Record<string, unknown>) =>
@@ -156,7 +159,10 @@ export async function answerGuarantorWith(
         at,
         ip: meta.ip,
         userAgent: meta.userAgent,
-        ...(answer === "accept" ? { declarationVersion: DECLARATION_VERSION, declarationSha256: DECLARATION_SHA256 } : {}),
+        // Contract §2: the accepted text itself, its version and its hash.
+        ...(answer === "accept"
+          ? { acceptedText: DECLARATION_TEXT, declarationVersion: DECLARATION_VERSION, declarationSha256: DECLARATION_SHA256 }
+          : {}),
         ...extra,
       })
 
@@ -177,9 +183,9 @@ export async function answerGuarantorWith(
     // the claim was lost, or another guarantor confirmed the same data meanwhile.
     state = await readState()
     if (!state) return { ok: false, code: "invalid" }
-    if (!holds(state.rows)) return { ok: false, code: "closed" }
     const changed = linkState(state)
     if (changed) return changed
+    if (!holds(state.rows)) return { ok: false, code: "busy" }
     if (reusesSomeoneElse(state)) return selfGuarantee()
 
     if (check.result === "ERROR") {

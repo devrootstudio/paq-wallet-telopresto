@@ -6,6 +6,7 @@ import { airtableFromEnv, AirtableError } from "@/lib/airtable"
 import { answerGuarantorWith, type AnswerMeta } from "@/lib/avales/answer"
 import { renapFromEnv } from "@/lib/avales/renap"
 import { createAvalesRepo } from "@/lib/avales/repo"
+import { isSimulation } from "@/lib/avales/runtime"
 import { guarantorRequestSchema, toFieldErrors } from "@/lib/avales/schema"
 import { isWellFormedToken } from "@/lib/avales/tokens"
 import type {
@@ -71,7 +72,8 @@ export async function submitGuarantorRequest(input: GuarantorRequestInput): Prom
     const repo = repoFromEnv()
     if (!repo) return { ok: false, code: "unavailable" }
     try {
-      const outcome = await repo.submit(parsed.data)
+      // In simulation the request is marked as test data, so only a simulation job ever processes it.
+      const outcome = await repo.submit(parsed.data, { test: isSimulation() })
       return { ok: true, ...outcome }
     } catch (error) {
       console.error(`[avales] submit failed: ${describe(error)}`)

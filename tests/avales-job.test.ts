@@ -13,7 +13,7 @@ import { answerGuarantorWith } from "@/lib/avales/answer"
 import { DECLARATION_TEXT } from "@/lib/avales/declaration"
 import { defaultCupo, defaultDisburse, runGuarantorJob, type DisburseOutcome, type JobDeps } from "@/lib/avales/job"
 import { simulatedRenap } from "@/lib/avales/renap"
-import { createAvalesRepo } from "@/lib/avales/repo"
+import { createAvalesRepo, isTestRequest } from "@/lib/avales/repo"
 import { isSimulation, simulatedCupo } from "@/lib/avales/runtime"
 import { guarantorRequestSchema } from "@/lib/avales/schema"
 import type { WhatsAppMessage, WhatsAppSender } from "@/lib/avales/whatsapp"
@@ -47,12 +47,19 @@ const request = guarantorRequestSchema.parse({
   ],
 })
 
-async function world() {
+/**
+ * `test`: a request created in simulation (test flag set), processed by simulation runs.
+ * `real`: a real request (no flag, real authorization), processed only outside simulation.
+ */
+async function world(mode: "test" | "real" = "test") {
   let now = T0
   const fake = createFakeAirtable({ now: () => now })
   const airtable = createAirtableClient({ token: "t", baseId: "appTEST0000000000", fetch: fake.fetch })
   const repo = createAvalesRepo({ airtable, now: () => now })
-  const { requestId } = await repo.submit(request)
+  const { requestId } =
+    mode === "test"
+      ? await repo.submit({ ...request, authorization: "SIM-job-0001" }, { test: true })
+      : await repo.submit({ ...request, authorization: "REAL-job-0001" })
   const sent: WhatsAppMessage[] = []
   const whatsapp: WhatsAppSender = async (m) => {
     sent.push(m)
@@ -123,10 +130,43 @@ describe("step 1: invite", () => {
   })
 
   it("never returns links outside simulation", async () => {
-    const w = await world()
+    const w = await world("real")
     const report = await w.run({ simulation: false })
     expect(report.invited).toBe(3)
     expect(report.links).toBeUndefined()
+  })
+
+  it("without a working WhatsApp no link is issued: guarantors stay pending with their hash", async () => {
+    const w = await world("real")
+    const hashes = [1, 2, 3].map((p) => w.g(p).fields["token-hash"])
+    const notReady = Object.assign(async () => ({ ok: false as const, reason: "whatsapp_not_integrated" }), { ready: false })
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const report = await w.run({ simulation: false, whatsapp: notReady })
+    expect(report.invited).toBe(0)
+    expect([1, 2, 3].map((p) => w.g(p).fields.status)).toEqual(["pending", "pending", "pending"])
+    expect([1, 2, 3].map((p) => w.g(p).fields["token-hash"])).toEqual(hashes)
+  })
+})
+
+describe("one shared base: simulation runs touch only test requests, real runs only real ones", () => {
+  it("a simulation run leaves a real request alone, and a real run leaves a test request alone", async () => {
+    const real = await world("real")
+    expect((await real.run({ simulation: true })).invited).toBe(0)
+    expect(real.g(1).fields.status).toBe("pending")
+
+    const test = await world("test")
+    expect((await test.run({ simulation: false })).invited).toBe(0)
+    expect(test.g(1).fields.status).toBe("pending")
+    await test.airtable.update("requests", [{ id: test.requestId, fields: { status: "quorum" } }])
+    expect((await test.run({ simulation: false })).released).toEqual([])
+    expect(test.disburse).not.toHaveBeenCalled()
+  })
+
+  it("requests older than the test flag: TEST-AVALES-* and AUTH-DOC-2025-EXAMPLE count as test data", () => {
+    expect(isTestRequest({ test: true })).toBe(true)
+    expect(isTestRequest({ authorization: "TEST-AVALES-1700000000000" })).toBe(true)
+    expect(isTestRequest({ authorization: "AUTH-DOC-2025-EXAMPLE" })).toBe(true)
+    expect(isTestRequest({ authorization: "a1b2c3d4e5f60718293a4b5c6d7e8f90011223344556677" })).toBe(false)
   })
 
   it("does not invite guarantors of a request past its deadline", async () => {
@@ -157,7 +197,7 @@ describe("steps 2–5: quorum and release", () => {
     })
     expect(w.g(3).fields.status).toBe("closed")
     expect(vi.mocked(generarPagare)).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(generarPagare).mock.calls[0][0]).toMatchObject({ autorizacion: "TEST-AVALES-job-0001", requestedAmount: 1000, fullName: "Solicitante Ficticio" })
+    expect(vi.mocked(generarPagare).mock.calls[0][0]).toMatchObject({ autorizacion: "SIM-job-0001", requestedAmount: 1000, fullName: "Solicitante Ficticio" })
     expect(vi.mocked(releaseRequest)).not.toHaveBeenCalled()
     expect(vi.mocked(validateCupo)).not.toHaveBeenCalled()
     expect(w.sent.find((m) => m.template === "contract_approved")).toMatchObject({ to: "55559999" })
@@ -400,7 +440,7 @@ describe("simulation boundaries", () => {
   })
 
   it("outside simulation the job uses the real valida_cupo and releaseRequest (mocked here)", async () => {
-    const w = await world()
+    const w = await world("real")
     await w.airtable.update("requests", [{ id: w.requestId, fields: { status: "quorum" } }])
     vi.mocked(validateCupo).mockResolvedValue({ returnCode: 0, message: "ok", cupoAutorizado: 3500, idSolicitud: "NEW-ID" })
     vi.mocked(releaseRequest).mockResolvedValue({ success: true, hasCommissionIssue: false, pagareUrl: "https://pdf.example/real.pdf", returnCode: "0" })
@@ -412,7 +452,7 @@ describe("simulation boundaries", () => {
       idSolicitud: "NEW-ID",
       monto: 1000,
       comision: 75,
-      autorizacion: "TEST-AVALES-job-0001",
+      autorizacion: "REAL-job-0001",
     })
     expect(vi.mocked(generarPagare)).not.toHaveBeenCalled()
     expect(report.links).toBeUndefined()

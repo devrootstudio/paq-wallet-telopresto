@@ -37,7 +37,8 @@ export interface AirtableClient {
   /** One record by id, or null when it does not exist. */
   get<F extends Fields = Fields>(table: string, id: string): Promise<AirtableRecord<F> | null>
   create<F extends Fields = Fields>(table: string, records: Fields[]): Promise<AirtableRecord<F>[]>
-  update<F extends Fields = Fields>(table: string, records: { id: string; fields: Fields }[]): Promise<AirtableRecord<F>[]>
+  /** `rateLimitRetries` overrides the client default for this call (0 = do not retry a 429). */
+  update<F extends Fields = Fields>(table: string, records: { id: string; fields: Fields }[], opts?: { rateLimitRetries?: number }): Promise<AirtableRecord<F>[]>
   /** Create-or-update matching on `mergeOn` (Airtable `performUpsert`). */
   upsert<F extends Fields = Fields>(table: string, records: Fields[], mergeOn: string[]): Promise<UpsertResult<F>>
 }
@@ -106,6 +107,7 @@ export function createAirtableClient(options: AirtableClientOptions): AirtableCl
     url: string,
     body?: unknown,
     notFoundIsNull = false,
+    maxRetries = retries,
   ): Promise<T | null> {
     let response: Response
     for (let attempt = 0; ; attempt++) {
@@ -125,7 +127,7 @@ export function createAirtableClient(options: AirtableClientOptions): AirtableCl
         throw new AirtableError(0, type, method, table)
       }
       // 429 = rate limited (5 requests/s per base): the request was not applied, so retrying is safe.
-      if (response.status !== 429 || attempt >= retries) break
+      if (response.status !== 429 || attempt >= maxRetries) break
       await sleep(1000 * 2 ** attempt)
     }
     // Only a single-record read maps 404 to null: on a list, 404 means a wrong base or table.
@@ -171,10 +173,10 @@ export function createAirtableClient(options: AirtableClientOptions): AirtableCl
       return out
     },
 
-    async update<F extends Fields>(table: string, records: { id: string; fields: Fields }[]) {
+    async update<F extends Fields>(table: string, records: { id: string; fields: Fields }[], opts?: { rateLimitRetries?: number }) {
       const out: AirtableRecord<F>[] = []
       for (const batch of chunk(records, WRITE_BATCH)) {
-        const res = await request<{ records: AirtableRecord<F>[] }>("PATCH", table, tableUrl(table), { records: batch })
+        const res = await request<{ records: AirtableRecord<F>[] }>("PATCH", table, tableUrl(table), { records: batch }, false, opts?.rateLimitRetries ?? retries)
         out.push(...(res?.records ?? []))
       }
       return out

@@ -66,6 +66,8 @@ export interface RequestFields {
   "expires-at"?: string
   "release-code"?: string
   "release-claim"?: string
+  /** Created in simulation (test bypass). Absent (unchecked) on real requests. */
+  test?: boolean
   audit?: string
 }
 
@@ -113,7 +115,7 @@ function byCreation(a: AirtableRecord, b: AirtableRecord) {
   return a.createdTime === b.createdTime ? a.id.localeCompare(b.id) : a.createdTime.localeCompare(b.createdTime)
 }
 
-function requestFields(input: ParsedGuarantorRequest, expiresAt: string) {
+function requestFields(input: ParsedGuarantorRequest, expiresAt: string, test: boolean) {
   const a = input.applicant
   return {
     authorization: input.authorization,
@@ -133,7 +135,22 @@ function requestFields(input: ParsedGuarantorRequest, expiresAt: string) {
     status: "pending_guarantors" satisfies RequestStatus,
     "expires-at": expiresAt,
     audit: JSON.stringify(input.audit),
+    ...(test ? { test: true } : {}),
   }
+}
+
+/** Requests created before the `test` field existed that are known to be test data. */
+const LEGACY_TEST_AUTHORIZATIONS = new Set(["AUTH-DOC-2025-EXAMPLE"])
+
+/**
+ * Local and production share one Airtable base. A request is test data when it was created in
+ * simulation (`test` checked) or, for requests older than that field, when its authorization is a
+ * known test one (`TEST-AVALES-*`, `AUTH-DOC-2025-EXAMPLE`). The job in simulation only processes
+ * test requests; outside simulation, only real ones.
+ */
+export function isTestRequest(r: RequestFields): boolean {
+  const authorization = r.authorization ?? ""
+  return r.test === true || authorization.startsWith("TEST-AVALES-") || LEGACY_TEST_AUTHORIZATIONS.has(authorization)
 }
 
 /** Applicant's full name, trimmed and with single spaces: what the guarantor sees. */
@@ -305,7 +322,7 @@ export function createAvalesRepo(deps: AvalesRepoDeps) {
    *   the lookup), the second upsert overwrites the request fields written by the first; guarantors
    *   keep the data of whichever call created each position.
    */
-  async function submit(input: ParsedGuarantorRequest): Promise<SubmitOutcome> {
+  async function submit(input: ParsedGuarantorRequest, options: { test?: boolean } = {}): Promise<SubmitOutcome> {
     const existing = await findRequests(input.authorization)
     if (existing.length > 0) {
       const canonical = canonicalOf(existing)
@@ -321,7 +338,7 @@ export function createAvalesRepo(deps: AvalesRepoDeps) {
     }
 
     const expiresAt = new Date(now().getTime() + EXPIRY_MS).toISOString()
-    const upserted = await airtable.upsert<RequestFields>(TABLES.requests, [requestFields(input, expiresAt)], ["authorization"])
+    const upserted = await airtable.upsert<RequestFields>(TABLES.requests, [requestFields(input, expiresAt, options.test ?? false)], ["authorization"])
     const own = upserted.records[0]
     if (!own) throw new Error("Airtable upsert returned no record")
 
