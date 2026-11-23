@@ -23,6 +23,8 @@ export const EMPTY_OUTCOME: AnswerOutcome = { kind: "form", fieldErrors: {}, mes
 /** identity_mismatch: ask to check the data, never what the official registry returned. */
 export const CHECK_DATA_MESSAGE = "No pudimos confirmar tus datos. Revisa tu nombre, DPI y teléfono e intenta de nuevo."
 export const RETRY_MESSAGE = "No pudimos registrar tu respuesta. Intenta de nuevo en unos minutos."
+/** busy: another answer of this guarantor is being recorded (another tab, a double click). The link is still open. */
+export const BUSY_MESSAGE = "Estamos registrando otra respuesta. Intenta de nuevo en un momento."
 
 function outcomeFor(result: Extract<AnswerResult, { ok: false }>): AnswerOutcome {
   switch (result.code) {
@@ -40,6 +42,8 @@ function outcomeFor(result: Extract<AnswerResult, { ok: false }>): AnswerOutcome
         }
       }
       return { kind: "form", fieldErrors: result.fieldErrors ?? {}, message: "Revisa los datos marcados." }
+    case "busy":
+      return { kind: "form", fieldErrors: {}, message: BUSY_MESSAGE, retry: true }
     case "unavailable":
     // `not_available` is deprecated (former stub): treated as a temporary failure.
     default:

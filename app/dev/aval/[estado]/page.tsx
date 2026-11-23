@@ -6,7 +6,7 @@ import { PREVIEW_STATES, previewOutcome, previewView, type PreviewState } from "
  * Development-only preview of the /aval/<token> screens with fictitious data, for screenshots and QA:
  * /dev/aval/formulario, formulario-rechazo, formulario-revisar-datos, respondido, respondido-rechazo,
  * cerrado, vencido, invalido, error (the view could not be loaded) and the screens after answering:
- * tras-avalar, tras-rechazar, tras-revisar-datos, tras-cerrado, tras-error. Answers go to the real
+ * tras-avalar, tras-rechazar, tras-revisar-datos, tras-cerrado, tras-error, tras-ocupado. Answers go to the real
  * `answerGuarantor` with a fake token.
  * Returns 404 in production builds.
  */

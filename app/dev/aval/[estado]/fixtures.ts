@@ -1,5 +1,5 @@
 import type { GuarantorView } from "@/lib/avales/types"
-import { CHECK_DATA_MESSAGE, RETRY_MESSAGE, type AnswerOutcome } from "@/components/aval/answer"
+import { BUSY_MESSAGE, CHECK_DATA_MESSAGE, RETRY_MESSAGE, type AnswerOutcome } from "@/components/aval/answer"
 
 /** Fictitious data for the development preview of /aval/<token>. Never used in production. */
 const base = (now: number) => ({
@@ -32,6 +32,7 @@ export const PREVIEW_STATES = [
   "tras-revisar-datos",
   "tras-cerrado",
   "tras-error",
+  "tras-ocupado",
 ] as const
 
 export type PreviewState = (typeof PREVIEW_STATES)[number]
@@ -45,6 +46,7 @@ export function previewView(state: PreviewState, now: number): GuarantorView {
     case "tras-revisar-datos":
     case "tras-cerrado":
     case "tras-error":
+    case "tras-ocupado":
       return { ...base(now), screen: "form", guarantor, identityMismatch: false }
     case "formulario-revisar-datos":
       return { ...base(now), screen: "form", guarantor, identityMismatch: true }
@@ -74,6 +76,8 @@ export function previewOutcome(state: PreviewState): AnswerOutcome | undefined {
       return { kind: "ended", screen: "closed" }
     case "tras-error":
       return { kind: "form", fieldErrors: {}, message: RETRY_MESSAGE, retry: true }
+    case "tras-ocupado":
+      return { kind: "form", fieldErrors: {}, message: BUSY_MESSAGE, retry: true }
     default:
       return undefined
   }
