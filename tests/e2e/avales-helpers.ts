@@ -95,6 +95,8 @@ export function linksFor(report: JobReport, requestId: string): Record<1 | 2 | 3
 
 /** Creates the request and invites its guarantors: returns its id and the three links. */
 export async function createAndInvite(page: Page, request: APIRequestContext, auth: string, data: GuarantorData[]) {
+  // Printed so every marked record can be listed for cleanup.
+  console.log(`[e2e] created ${auth}`)
   await createRequest(page, auth, data)
   const created = await state(request, auth)
   expect(created).toMatchObject({ found: true, status: "pending_guarantors" })

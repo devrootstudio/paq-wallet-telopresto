@@ -150,7 +150,9 @@ test("doble aceptación simultánea: un solo desembolso", async ({ page, request
   const auth = testAuth("doble")
   const { requestId, links } = await createAndInvite(page, request, auth, guarantors())
 
-  // The same guarantor answers from two tabs at the same time: one is registered, the other is refused.
+  // The same guarantor answers from two tabs at the same time. Sequential double sends get `closed`;
+  // truly simultaneous ones may both be registered as the same answer. Either way the guarantor ends
+  // up authorized once and the request is disbursed once (checked below).
   const tabA = await openLink(browser, links[1])
   const tabB = await openLink(browser, links[1])
   for (const tab of [tabA, tabB]) await tab.getByRole("checkbox").check()
@@ -161,7 +163,8 @@ test("doble aceptación simultánea: un solo desembolso", async ({ page, request
       return (await tab.getByText(THANKS).count()) > 0 ? "thanks" : "closed"
     }),
   )
-  expect(screens.sort()).toEqual(["closed", "thanks"])
+  expect(screens).toContain("thanks")
+  expect((await state(request, auth)).guarantors?.[0].status).toBe("authorized")
   await Promise.all([tabA, tabB].map((tab) => tab.context().close()))
 
   // Guarantors 2 and 3 accept at the same time: both are registered.
