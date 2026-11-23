@@ -69,7 +69,7 @@ export async function submitAnswer(
 
 interface AvalFormProps {
   token: string
-  applicantFirstName: string
+  applicantName: string
   guarantor: GuarantorAnswerInput
   /** Initial step of the form: `confirm-reject` opens the rejection warning (used by the dev preview). */
   initialMode?: "form" | "confirm-reject"
@@ -90,7 +90,7 @@ function FieldError({ id, message }: { id: string; message?: string }) {
   )
 }
 
-export default function AvalForm({ token, applicantFirstName, guarantor, initialMode = "form" }: AvalFormProps) {
+export default function AvalForm({ token, applicantName, guarantor, initialMode = "form" }: AvalFormProps) {
   // The guarantor's own DPI and phone are rendered only in the two inputs below (initial value here):
   // masking them later is a change in this component alone. The inputs keep what the person types
   // (spaces and dashes included) so the cursor never jumps; the shared schema strips separators.
@@ -143,14 +143,14 @@ export default function AvalForm({ token, applicantFirstName, guarantor, initial
   if (outcome.done === "authorized") {
     return (
       <p role="status" className="rounded-2xl bg-white/10 p-5 text-center text-base font-semibold text-white">
-        ¡Gracias! Registramos tu aval para {applicantFirstName}.
+        ¡Gracias! Registramos tu aval para {applicantName}.
       </p>
     )
   }
   if (outcome.done === "rejected") {
     return (
       <p role="status" className="rounded-2xl bg-white/10 p-5 text-center text-base font-semibold text-white">
-        Registramos que no avalas la solicitud de {applicantFirstName}.
+        Registramos que no avalas la solicitud de {applicantName}.
       </p>
     )
   }
@@ -238,7 +238,7 @@ export default function AvalForm({ token, applicantFirstName, guarantor, initial
               disabled={sending}
               className="mt-0.5 h-5 w-5 flex-none rounded accent-paq-light-green"
             />
-            <span>Conozco a {applicantFirstName} y acepto avalar su solicitud de adelanto.</span>
+            <span>Conozco a {applicantName} y acepto avalar su solicitud de adelanto.</span>
           </label>
 
           <button
@@ -272,7 +272,7 @@ export default function AvalForm({ token, applicantFirstName, guarantor, initial
             ¿Seguro que quieres rechazar?
           </h2>
           <ul id="aval-rechazo-detalle" className="mb-4 list-disc space-y-1 pl-5 text-sm leading-relaxed">
-            <li>{applicantFirstName} no contará con tu aval para su adelanto.</li>
+            <li>{applicantName} no contará con tu aval para su adelanto.</li>
             <li>Si 2 de sus 3 referencias rechazan, su solicitud se cancela.</li>
             <li>Ya no podrás cambiar tu respuesta.</li>
           </ul>

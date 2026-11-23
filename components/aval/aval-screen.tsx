@@ -5,7 +5,8 @@ import TimeLeft from "./time-left"
 
 /**
  * The 5 screens of /aval/<token> (contract §4). Renders only what `GuarantorView` carries: the
- * applicant's first name, the amount, the time left and, on the form, the guarantor's own data.
+ * applicant's full name (so the guarantor knows who is asking), the amount, the time left and, on the
+ * form, the guarantor's own data.
  */
 interface AvalScreenProps {
   view: GuarantorView
@@ -24,15 +25,30 @@ function Shell({ children }: { children: React.ReactNode }) {
   )
 }
 
+/** Full name of the applicant; falls back to the first name if the full one is missing. */
+export const applicantNameOf = (base: GuarantorViewBase) =>
+  base.applicantName?.trim().replace(/\s+/g, " ") || base.applicantFirstName.trim()
+
+/**
+ * Avatar initials: first name + first surname, assuming the usual "names + two surnames" order
+ * ("María Elena Vásquez Morales" → "MV", "María Vásquez" → "MV", "María" → "M").
+ */
+export function applicantInitials(fullName: string): string {
+  const words = fullName.split(" ").filter(Boolean)
+  if (words.length === 0) return "?"
+  const surname = words.length >= 4 ? words[2] : words.length >= 2 ? words[1] : ""
+  return (words[0].charAt(0) + surname.charAt(0)).toUpperCase()
+}
+
 function RequestCard({ base, children }: { base: GuarantorViewBase; children: React.ReactNode }) {
-  const initial = firstName(base.applicantFirstName).charAt(0).toUpperCase() || "?"
+  const initials = applicantInitials(applicantNameOf(base))
   return (
     <section className="mb-6 rounded-3xl bg-paq-yellow px-5 py-6 text-center text-paq-green">
       <div
         aria-hidden="true"
         className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-paq-green text-xl font-extrabold text-paq-yellow"
       >
-        {initial}
+        {initials}
       </div>
       {children}
       <span className="mt-3 inline-block rounded-full bg-paq-green px-4 py-1.5 text-[15px] font-extrabold text-paq-yellow">
@@ -63,8 +79,7 @@ export default function AvalScreen({ view, token, now = Date.now(), initialMode 
     )
   }
 
-  // Defensive: only the first name is ever shown, even if more arrives.
-  const name = firstName(view.applicantFirstName)
+  const name = applicantNameOf(view)
   const timeLeft = formatTimeLeft(view.expiresAt, now)
 
   if (view.screen === "form") {
@@ -72,7 +87,7 @@ export default function AvalScreen({ view, token, now = Date.now(), initialMode 
       <Shell>
         <p className="mb-5 text-center text-xl font-bold">¡Hola, {firstName(view.guarantor.fullName)}!</p>
         <RequestCard base={view}>
-          <h1 className="mb-2 text-lg font-bold leading-snug">{name} está solicitando un adelanto de salario</h1>
+          <h1 className="mb-2 text-lg font-bold leading-snug break-words">{name} está solicitando un adelanto de salario</h1>
           <p className="text-sm leading-relaxed">
             Te eligió como una de sus referencias personales y necesitamos tu ayuda para avalar su solicitud.
           </p>
@@ -86,7 +101,7 @@ export default function AvalScreen({ view, token, now = Date.now(), initialMode 
 
         <AvalForm
           token={token}
-          applicantFirstName={name}
+          applicantName={name}
           // Only the three fields the guarantor confirms cross into the client bundle.
           guarantor={{
             fullName: view.guarantor.fullName,
@@ -118,7 +133,7 @@ export default function AvalScreen({ view, token, now = Date.now(), initialMode 
     return (
       <Shell>
         <RequestCard base={view}>
-          <h1 className="text-lg font-bold leading-snug">Solicitud de adelanto de {name}</h1>
+          <h1 className="text-lg font-bold leading-snug break-words">Solicitud de adelanto de {name}</h1>
         </RequestCard>
         <Message title="Ya respondiste esta solicitud">
           <p>
@@ -136,7 +151,7 @@ export default function AvalScreen({ view, token, now = Date.now(), initialMode 
     return (
       <Shell>
         <RequestCard base={view}>
-          <h1 className="text-lg font-bold leading-snug">Solicitud de adelanto de {name}</h1>
+          <h1 className="text-lg font-bold leading-snug break-words">Solicitud de adelanto de {name}</h1>
         </RequestCard>
         <Message title="Esta solicitud ya se resolvió">
           <p>Ya no es necesario tu aval. Gracias por tomarte el tiempo de revisarla.</p>
@@ -148,7 +163,7 @@ export default function AvalScreen({ view, token, now = Date.now(), initialMode 
   return (
     <Shell>
       <RequestCard base={view}>
-        <h1 className="text-lg font-bold leading-snug">Solicitud de adelanto de {name}</h1>
+        <h1 className="text-lg font-bold leading-snug break-words">Solicitud de adelanto de {name}</h1>
       </RequestCard>
       <Message title="Esta solicitud venció">
         <p>Pasaron las 48 horas para responder y la solicitud ya no está activa. No necesitas hacer nada.</p>

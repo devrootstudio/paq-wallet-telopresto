@@ -8,7 +8,7 @@ vi.mock("@/app/avales-actions", () => ({
 }))
 
 import { answerGuarantor, getGuarantorView } from "@/app/avales-actions"
-import AvalScreen from "@/components/aval/aval-screen"
+import AvalScreen, { applicantInitials } from "@/components/aval/aval-screen"
 import AvalError from "@/components/aval/aval-error"
 import AvalForm, { NOT_AVAILABLE_MESSAGE, submitAnswer } from "@/components/aval/aval-form"
 import { formatTimeLeft } from "@/components/aval/format"
@@ -20,7 +20,8 @@ import type { GuarantorView } from "@/lib/avales/types"
 const m = (fn: unknown) => fn as ReturnType<typeof vi.fn>
 
 const NOW = Date.parse("2026-11-22T12:00:00Z")
-const base = { applicantFirstName: "María", amount: 3500, expiresAt: "2026-11-24T11:52:00Z" }
+const FULL_NAME = "María Fernanda Solicitante Ejemplo"
+const base = { applicantFirstName: "María", applicantName: FULL_NAME, amount: 3500, expiresAt: "2026-11-24T11:52:00Z" }
 const guarantor = {
   fullName: "Carlos Ejemplo Prueba",
   phone: "10000001",
@@ -36,16 +37,37 @@ describe("/aval/<token> screens", () => {
   it("form: greets the guarantor, shows first name, amount, time left, own data, Avalar and Rechazar", () => {
     const html = render({ ...base, screen: "form", guarantor, identityMismatch: false })
     expect(html).toContain("¡Hola, Carlos!")
-    expect(html).toContain("María está solicitando un adelanto de salario")
+    expect(html).toContain(`${FULL_NAME} está solicitando un adelanto de salario`)
+    expect(html).toContain(">MS<")
     expect(html).toContain("Q3500.00")
     expect(html).toContain("47:52 h")
     expect(html).toContain('value="Carlos Ejemplo Prueba"')
     expect(html).toContain('value="1000 00000 0101"')
     expect(html).toContain('value="1000 0001"')
-    expect(html).toContain("Conozco a María y acepto avalar")
+    expect(html).toContain(`Conozco a ${FULL_NAME} y acepto avalar`)
+    expect(html).toContain(`Si no reconoces a ${FULL_NAME}`)
     expect(html).toContain(">Avalar<")
     expect(html).toContain(">Rechazar<")
     expect(html).not.toContain("registro oficial")
+  })
+
+  it("closed and expired name the applicant in full", () => {
+    expect(render({ ...base, screen: "closed" })).toContain(`Solicitud de adelanto de ${FULL_NAME}`)
+    expect(render({ ...base, screen: "expired" })).toContain(`Solicitud de adelanto de ${FULL_NAME}`)
+  })
+
+  it("without a full name it falls back to the first name", () => {
+    const { applicantName: _omit, ...withoutFull } = base
+    void _omit
+    const html = render({ ...withoutFull, screen: "closed" } as unknown as GuarantorView)
+    expect(html).toContain("Solicitud de adelanto de María<")
+  })
+
+  it("avatar initials: first name + first surname", () => {
+    expect(applicantInitials("María Elena Vásquez Morales")).toBe("MV")
+    expect(applicantInitials("María Vásquez")).toBe("MV")
+    expect(applicantInitials("María")).toBe("M")
+    expect(applicantInitials("")).toBe("?")
   })
 
   it("form with identity mismatch asks to check the data", () => {
@@ -56,10 +78,10 @@ describe("/aval/<token> screens", () => {
   it("answered: authorized and rejected", () => {
     const yes = render({ ...base, screen: "answered", answer: "authorized" })
     expect(yes).toContain("Ya respondiste esta solicitud")
-    expect(yes).toContain("Registramos tu aval para María")
+    expect(yes).toContain(`Registramos tu aval para ${FULL_NAME}`)
     expect(yes).not.toContain(">Avalar<")
     const no = render({ ...base, screen: "answered", answer: "rejected" })
-    expect(no).toContain("Registramos que no avalas la solicitud de María")
+    expect(no).toContain(`Registramos que no avalas la solicitud de ${FULL_NAME}`)
   })
 
   it("closed: the request was resolved, no actions", () => {
@@ -102,10 +124,10 @@ describe("/aval/<token> screens", () => {
 
   it("the rejection step warns what rejecting implies", () => {
     const html = renderToStaticMarkup(
-      createElement(AvalForm, { token: "tok", applicantFirstName: "María", guarantor, initialMode: "confirm-reject" }),
+      createElement(AvalForm, { token: "tok", applicantName: FULL_NAME, guarantor, initialMode: "confirm-reject" }),
     )
     expect(html).toContain("¿Seguro que quieres rechazar?")
-    expect(html).toContain("María no contará con tu aval")
+    expect(html).toContain(`${FULL_NAME} no contará con tu aval`)
     expect(html).toContain("Si 2 de sus 3 referencias rechazan, su solicitud se cancela")
     expect(html).toContain("Ya no podrás cambiar tu respuesta")
     expect(html).toContain("Sí, rechazar")
@@ -225,7 +247,7 @@ describe("pages", () => {
       formulario: "¡Hola, Carlos!",
       "formulario-rechazo": "¿Seguro que quieres rechazar?",
       "formulario-revisar-datos": "no coincidieron con el registro oficial",
-      respondido: "Registramos tu aval para María",
+      respondido: `Registramos tu aval para ${FULL_NAME}`,
       "respondido-rechazo": "Registramos que no avalas",
       cerrado: "Esta solicitud ya se resolvió",
       vencido: "Esta solicitud venció",

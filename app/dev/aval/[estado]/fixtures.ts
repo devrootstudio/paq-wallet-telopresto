@@ -3,6 +3,7 @@ import type { GuarantorView } from "@/lib/avales/types"
 /** Fictitious data for the development preview of /aval/<token>. Never used in production. */
 const base = (now: number) => ({
   applicantFirstName: "María",
+  applicantName: "María Fernanda Solicitante Ejemplo",
   amount: 3500,
   // 47:52 h left
   expiresAt: new Date(now + (47 * 60 + 52) * 60_000 + 30_000).toISOString(),
