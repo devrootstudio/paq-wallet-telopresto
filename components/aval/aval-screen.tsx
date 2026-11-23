@@ -1,6 +1,8 @@
 import type { GuarantorView, GuarantorViewBase } from "@/lib/avales/types"
 import AvalForm from "./aval-form"
+import type { AnswerOutcome } from "./answer"
 import { firstName, formatAmount, formatTimeLeft } from "./format"
+import Message from "./message"
 import TimeLeft from "./time-left"
 
 /**
@@ -15,6 +17,8 @@ interface AvalScreenProps {
   now?: number
   /** Dev preview only: open the form on the rejection warning. */
   initialMode?: "form" | "confirm-reject"
+  /** Dev preview only: open the form on a screen shown after answering. */
+  initialOutcome?: AnswerOutcome
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -58,17 +62,7 @@ function RequestCard({ base, children }: { base: GuarantorViewBase; children: Re
   )
 }
 
-function Message({ title, children, level = 2 }: { title: string; children: React.ReactNode; level?: 1 | 2 }) {
-  const Heading = level === 1 ? "h1" : "h2"
-  return (
-    <section className="rounded-2xl border border-white/20 bg-white/5 p-5 text-center">
-      <Heading className="mb-2 text-lg font-bold">{title}</Heading>
-      <div className="text-sm leading-relaxed text-white/80">{children}</div>
-    </section>
-  )
-}
-
-export default function AvalScreen({ view, token, now = Date.now(), initialMode }: AvalScreenProps) {
+export default function AvalScreen({ view, token, now = Date.now(), initialMode, initialOutcome }: AvalScreenProps) {
   if (view.screen === "invalid") {
     return (
       <Shell>
@@ -95,7 +89,7 @@ export default function AvalScreen({ view, token, now = Date.now(), initialMode 
 
         {view.identityMismatch && (
           <p role="alert" className="mb-4 rounded-lg border border-paq-yellow/60 bg-paq-yellow/10 px-3 py-2 text-sm">
-            Tus datos no coincidieron con el registro oficial. Revisa tu nombre, DPI y teléfono antes de avalar.
+            No pudimos confirmar tus datos. Revisa tu nombre, DPI y teléfono antes de avalar.
           </p>
         )}
 
@@ -109,21 +103,25 @@ export default function AvalScreen({ view, token, now = Date.now(), initialMode 
             phone: view.guarantor.phone,
           }}
           initialMode={initialMode}
+          initialOutcome={initialOutcome}
+          initialAnswer={initialOutcome ? "accept" : undefined}
+          // Shown only while the form can still be answered.
+          footer={
+            <p className="mt-4 text-center text-xs leading-relaxed text-white/60">
+              {timeLeft && (
+                <>
+                  Esta solicitud vence en{" "}
+                  <b className="text-white/90">
+                    <TimeLeft expiresAt={view.expiresAt} now={now} />
+                  </b>
+                  .
+                  <br />
+                </>
+              )}
+              Si no reconoces a {name}, presiona <b className="text-white/90">Rechazar</b>.
+            </p>
+          }
         />
-
-        <p className="mt-4 text-center text-xs leading-relaxed text-white/60">
-          {timeLeft && (
-            <>
-              Esta solicitud vence en{" "}
-              <b className="text-white/90">
-                <TimeLeft expiresAt={view.expiresAt} now={now} />
-              </b>
-              .
-              <br />
-            </>
-          )}
-          Si no reconoces a {name}, presiona <b className="text-white/90">Rechazar</b>.
-        </p>
       </Shell>
     )
   }

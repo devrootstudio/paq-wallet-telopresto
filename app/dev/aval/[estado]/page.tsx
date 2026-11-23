@@ -1,11 +1,12 @@
 import { notFound } from "next/navigation"
 import AvalScreen from "@/components/aval/aval-screen"
-import { PREVIEW_STATES, previewView, type PreviewState } from "./fixtures"
+import { PREVIEW_STATES, previewOutcome, previewView, type PreviewState } from "./fixtures"
 
 /**
  * Development-only preview of the /aval/<token> screens with fictitious data, for screenshots and QA:
  * /dev/aval/formulario, formulario-rechazo, formulario-revisar-datos, respondido, respondido-rechazo,
- * cerrado, vencido, invalido, and error (the view could not be loaded). Answers go to the real
+ * cerrado, vencido, invalido, error (the view could not be loaded) and the screens after answering:
+ * tras-avalar, tras-rechazar, tras-revisar-datos, tras-cerrado, tras-error. Answers go to the real
  * `answerGuarantor` with a fake token.
  * Returns 404 in production builds.
  */
@@ -27,6 +28,7 @@ export default async function AvalPreviewPage({ params }: { params: Promise<{ es
       token="dev-preview"
       now={now}
       initialMode={state === "formulario-rechazo" ? "confirm-reject" : "form"}
+      initialOutcome={previewOutcome(state)}
     />
   )
 }

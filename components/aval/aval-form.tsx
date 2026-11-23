@@ -1,71 +1,11 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { answerGuarantor } from "@/app/avales-actions"
-import { guarantorAnswerSchema, toFieldErrors } from "@/lib/avales/schema"
-import type { AnswerResult, FieldErrors, GuarantorAnswer, GuarantorAnswerInput } from "@/lib/avales/types"
+import type { GuarantorAnswer, GuarantorAnswerInput } from "@/lib/avales/types"
 import { cn } from "@/lib/utils"
 import { formatDPI, formatPhone, withoutCountryCode } from "./format"
-
-/** What the form shows after the guarantor presses Avalar or confirms Rechazar. */
-export interface AnswerOutcome {
-  /** Final state reached (then the form is replaced by a thank-you message). */
-  done?: "authorized" | "rejected"
-  fieldErrors: FieldErrors
-  message: string | null
-}
-
-export const NOT_AVAILABLE_MESSAGE =
-  "Todavía no podemos registrar tu respuesta. Estamos terminando de habilitar esta opción: vuelve a abrir este link más tarde."
-
-function messageFor(result: Extract<AnswerResult, { ok: false }>): string {
-  switch (result.code) {
-    case "not_available":
-      return NOT_AVAILABLE_MESSAGE
-    case "validation":
-      return "Revisa los datos marcados."
-    case "expired":
-      return "Esta solicitud ya venció. No es necesario que respondas."
-    case "closed":
-      return "Esta solicitud ya se resolvió. No es necesario que respondas."
-    case "invalid":
-      return "Este link no es válido."
-    case "unavailable":
-    default:
-      return "No pudimos registrar tu respuesta. Intenta de nuevo en unos minutos."
-  }
-}
-
-/**
- * Validates (for `accept`) with the shared schema, calls `answerGuarantor` and turns the result into
- * what the form shows. Does not call the server when the data to accept is invalid.
- */
-export async function submitAnswer(
-  token: string,
-  answer: GuarantorAnswer,
-  data: GuarantorAnswerInput,
-  send: typeof answerGuarantor = answerGuarantor,
-): Promise<AnswerOutcome> {
-  if (answer === "accept") {
-    const parsed = guarantorAnswerSchema.safeParse(data)
-    if (!parsed.success) return { fieldErrors: toFieldErrors(parsed.error), message: "Revisa los datos marcados." }
-  }
-  try {
-    const result = await send(token, answer, data)
-    if (result.ok) {
-      if (result.status === "identity_mismatch") {
-        return {
-          fieldErrors: {},
-          message: "Tus datos no coinciden con el registro oficial. Revisa tu nombre, DPI y teléfono e intenta de nuevo.",
-        }
-      }
-      return { done: result.status, fieldErrors: {}, message: null }
-    }
-    return { fieldErrors: result.fieldErrors ?? {}, message: messageFor(result) }
-  } catch {
-    return { fieldErrors: {}, message: "No pudimos registrar tu respuesta. Revisa tu conexión e intenta de nuevo." }
-  }
-}
+import Message from "./message"
+import { EMPTY_OUTCOME as EMPTY, submitAnswer, type AnswerOutcome } from "./answer"
 
 interface AvalFormProps {
   token: string
@@ -73,6 +13,12 @@ interface AvalFormProps {
   guarantor: GuarantorAnswerInput
   /** Initial step of the form: `confirm-reject` opens the rejection warning (used by the dev preview). */
   initialMode?: "form" | "confirm-reject"
+  /** Rendered under the form only while it can still be answered (time left, "si no reconoces…"). */
+  footer?: React.ReactNode
+  /** Dev preview only: start on a given outcome (screens after answering). */
+  initialOutcome?: AnswerOutcome
+  /** Dev preview only: the answer a retry would resend. */
+  initialAnswer?: GuarantorAnswer
 }
 
 const inputClass = (hasError: boolean) =>
@@ -90,7 +36,21 @@ function FieldError({ id, message }: { id: string; message?: string }) {
   )
 }
 
-export default function AvalForm({ token, applicantName, guarantor, initialMode = "form" }: AvalFormProps) {
+const ENDED: Record<"closed" | "expired" | "invalid", { title: string; text: string }> = {
+  closed: { title: "Esta solicitud ya se resolvió", text: "Ya no es necesario tu aval. Gracias por tomarte el tiempo de revisarla." },
+  expired: { title: "Esta solicitud venció", text: "Pasaron las 48 horas para responder y la solicitud ya no está activa." },
+  invalid: { title: "Este link no es válido", text: "Revisa que hayas abierto el link completo que te llegó por WhatsApp." },
+}
+
+export default function AvalForm({
+  token,
+  applicantName,
+  guarantor,
+  initialMode = "form",
+  footer,
+  initialOutcome = EMPTY,
+  initialAnswer,
+}: AvalFormProps) {
   // The guarantor's own DPI and phone are rendered only in the two inputs below (initial value here):
   // masking them later is a change in this component alone. The inputs keep what the person types
   // (spaces and dashes included) so the cursor never jumps; the shared schema strips separators.
@@ -101,7 +61,8 @@ export default function AvalForm({ token, applicantName, guarantor, initialMode 
   })
   const [accepted, setAccepted] = useState(false)
   const [mode, setMode] = useState<"form" | "confirm-reject">(initialMode)
-  const [outcome, setOutcome] = useState<AnswerOutcome>({ fieldErrors: {}, message: null })
+  const [outcome, setOutcome] = useState<AnswerOutcome>(initialOutcome)
+  const [lastAnswer, setLastAnswer] = useState<GuarantorAnswer | null>(initialAnswer ?? null)
   const [sending, setSending] = useState(false)
   const inFlight = useRef(false)
   const rejectButton = useRef<HTMLButtonElement>(null)
@@ -117,7 +78,7 @@ export default function AvalForm({ token, applicantName, guarantor, initialMode 
 
   const changeMode = (next: "form" | "confirm-reject") => {
     switchedMode.current = true
-    setOutcome({ fieldErrors: {}, message: null })
+    setOutcome(EMPTY)
     setMode(next)
   }
 
@@ -127,6 +88,7 @@ export default function AvalForm({ token, applicantName, guarantor, initialMode 
     if (inFlight.current) return
     inFlight.current = true
     setSending(true)
+    setLastAnswer(answer)
     try {
       // The contract ignores the data on reject: do not send it.
       const payload =
@@ -140,18 +102,25 @@ export default function AvalForm({ token, applicantName, guarantor, initialMode 
     }
   }
 
-  if (outcome.done === "authorized") {
-    return (
-      <p role="status" className="rounded-2xl bg-white/10 p-5 text-center text-base font-semibold text-white">
-        ¡Gracias! Registramos tu aval para {applicantName}.
-      </p>
+  if (outcome.kind === "done") {
+    return outcome.status === "authorized" ? (
+      <Message title="¡Gracias por tu apoyo!" role="status">
+        <p>Registramos tu aval para {applicantName}.</p>
+        <p className="mt-2">No necesitas hacer nada más. Ya puedes cerrar esta pantalla.</p>
+      </Message>
+    ) : (
+      <Message title="Registramos tu respuesta" role="status">
+        <p>Registramos que no avalas la solicitud de {applicantName}.</p>
+        <p className="mt-2">No necesitas hacer nada más. Ya puedes cerrar esta pantalla.</p>
+      </Message>
     )
   }
-  if (outcome.done === "rejected") {
+  if (outcome.kind === "ended") {
+    const ended = ENDED[outcome.screen]
     return (
-      <p role="status" className="rounded-2xl bg-white/10 p-5 text-center text-base font-semibold text-white">
-        Registramos que no avalas la solicitud de {applicantName}.
-      </p>
+      <Message title={ended.title} role="status">
+        <p>{ended.text}</p>
+      </Message>
     )
   }
 
@@ -223,9 +192,19 @@ export default function AvalForm({ token, applicantName, guarantor, initialMode 
       </section>
 
       {outcome.message && (
-        <p role="alert" className="mb-4 rounded-lg border border-paq-yellow/60 bg-paq-yellow/10 px-3 py-2 text-sm text-white">
-          {outcome.message}
-        </p>
+        <div role="alert" className="mb-4 rounded-lg border border-paq-yellow/60 bg-paq-yellow/10 px-3 py-2 text-sm text-white">
+          <p>{outcome.message}</p>
+          {outcome.retry && lastAnswer && (
+            <button
+              type="button"
+              onClick={() => send(lastAnswer)}
+              disabled={sending}
+              className="mt-2 rounded-full border border-white/60 px-4 py-1.5 text-xs font-bold uppercase tracking-wide text-white disabled:opacity-60"
+            >
+              {sending ? "Enviando..." : "Intentar de nuevo"}
+            </button>
+          )}
+        </div>
       )}
 
       {mode === "form" ? (
@@ -294,6 +273,7 @@ export default function AvalForm({ token, applicantName, guarantor, initialMode 
           </button>
         </section>
       )}
+      {footer}
     </div>
   )
 }
