@@ -169,9 +169,12 @@ describe("answerGuarantor: one answer at a time per guarantor (answer-claim)", (
   })
 
   it("a RENAP error frees the claim so the guarantor can retry right away", async () => {
+    const warns: string[] = []
+    vi.spyOn(console, "warn").mockImplementation((...a: unknown[]) => void warns.push(a.join(" ")))
     const { deps, tokens, g } = world()
     expect(await answerGuarantorWith(deps, tokens[0], "accept", accept("1234567899999"), META)).toEqual({ ok: false, code: "unavailable" })
     expect(g(1).fields["answer-claim"]).toBe("")
+    expect(warns.join("\n")).toMatch(/answer unavailable for rec\w+: identity check failed; retry/)
     expect(await answerGuarantorWith(deps, tokens[0], "accept", accept(), META)).toEqual({ ok: true, status: "authorized" })
   })
 
@@ -191,13 +194,59 @@ describe("answerGuarantor: one answer at a time per guarantor (answer-claim)", (
     expect(await answerGuarantorWith(deps, tokens[0], "reject", blank, META)).toEqual({ ok: true, status: "rejected" })
   })
 
-  it("a claim confirmed too long after the read answers unavailable without calling RENAP", async () => {
+  it("a claim confirmed later than the pause after the read steps back: unavailable, claim freed, retry works", async () => {
     const renap = vi.fn(simulatedRenap)
     const w = world({ renap })
     const reads = [0, 100]
     const deps = { ...w.deps, clock: () => reads.shift() ?? 100, claimSettleMs: 12 }
     expect(await answerGuarantorWith(deps, w.tokens[0], "accept", accept(), META)).toEqual({ ok: false, code: "unavailable" })
     expect(renap).not.toHaveBeenCalled()
+    expect(w.g(1).fields["answer-claim"]).toBe("")
+    expect(await answerGuarantorWith(w.deps, w.tokens[0], "accept", accept(), META)).toEqual({ ok: true, status: "authorized" })
+  })
+
+  // Regression for the live-base failure: against real Airtable every call takes hundreds of ms.
+  // With the real clock and the default pause, two simultaneous answers must register exactly one
+  // (the other gets `closed`), and nothing may be left without an answer.
+  describe.each([300, 900])("with %i ms per Airtable call and the real clock", (latencyMs) => {
+    function slowWorld() {
+      const renap = vi.fn(simulatedRenap)
+      const w = world({ renap })
+      const slow = createAirtableClient({
+        token: "t",
+        baseId: "appTEST0000000000",
+        fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+          await new Promise((resolve) => setTimeout(resolve, latencyMs))
+          return w.fake.fetch(url, init)
+        }) as typeof fetch,
+      })
+      const deps: AnswerDeps = { ...w.deps, airtable: slow, clock: Date.now, claimSettleMs: undefined }
+      return { ...w, renap, deps }
+    }
+
+    it("two simultaneous accepts: exactly one authorized, the other closed", async () => {
+      const w = slowWorld()
+      const results = await Promise.all([
+        answerGuarantorWith(w.deps, w.tokens[0], "accept", accept(), META),
+        answerGuarantorWith(w.deps, w.tokens[0], "accept", accept(), META),
+      ])
+      expect(results).toContainEqual({ ok: true, status: "authorized" })
+      expect(results).toContainEqual({ ok: false, code: "closed" })
+      expect(w.renap).toHaveBeenCalledTimes(1)
+      expect(w.g(1).fields.status).toBe("authorized")
+    }, 40_000)
+
+    it("accept and reject at once: exactly one recorded, the other closed", async () => {
+      const w = slowWorld()
+      const results = await Promise.all([
+        answerGuarantorWith(w.deps, w.tokens[0], "accept", accept(), META),
+        answerGuarantorWith(w.deps, w.tokens[0], "reject", blank, META),
+      ])
+      const recorded = results.filter((r) => r.ok)
+      expect(recorded).toHaveLength(1)
+      expect(results.filter((r) => !r.ok)).toEqual([{ ok: false, code: "closed" }])
+      expect(w.g(1).fields.status).toBe((recorded[0] as { status: string }).status)
+    }, 40_000)
   })
 
   it("an unexpected failure after claiming frees the claim", async () => {
@@ -257,6 +306,7 @@ describe("answerGuarantor: state changes while RENAP answers", () => {
     expect(await answerGuarantorWith(w.deps, w.tokens[0], "accept", accept(), META)).toEqual({ ok: false, code: "closed" })
     expect(w.g(1).fields).toMatchObject({ status: "invited", identification: "0000000000001" })
     expect(w.g(1).fields["renap-result"]).toBeUndefined()
+    expect(w.g(1).fields["answer-claim"]).toBe("") // non-final exit frees the claim
   })
 
   it("the deadline passing meanwhile → expired", async () => {
