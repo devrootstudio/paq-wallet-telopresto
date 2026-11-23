@@ -143,22 +143,38 @@ export type GuarantorView =
 
 export type GuarantorAnswer = "accept" | "reject"
 
-/** What the guarantor confirms on the form. Required for `accept`; ignored for `reject`. */
+/** What the guarantor confirms on the form. Name, DPI and phone are required for `accept`; ignored for `reject`. */
 export interface GuarantorAnswerInput {
   fullName: string
   identification: string
   phone: string
+  /**
+   * For `accept`: the declaration text the guarantor accepted, exactly `DECLARATION_TEXT`
+   * (lib/avales/declaration.ts). The server checks it and stores its hash as evidence.
+   */
+  acceptedText?: string
 }
 
 export type AnswerErrorCode =
-  /** Not implemented yet (RENAP lands in a later task). */
-  | "not_available"
-  | "validation"
-  | "invalid"
-  | "expired"
+  /** The link no longer takes answers: already answered, request resolved, or guarantor closed. */
   | "closed"
+  /** The request or the guarantor expired (also when `expiresAt` passed before the job ran). */
+  | "expired"
+  /** Unknown or malformed token. */
+  | "invalid"
+  /** Storage or identity check unavailable. Safe to retry. */
   | "unavailable"
+  /** The confirmed data or the accepted text failed validation; see `fieldErrors`. */
+  | "validation"
+  /** @deprecated Former stub answer; no longer returned. */
+  | "not_available"
 
+/**
+ * Result of `answerGuarantor`. Seven outcomes:
+ * - ok: `authorized` (accepted and RENAP matches), `rejected` (declined), `identity_mismatch`
+ *   (RENAP does not match: the link stays open so the guarantor can correct the data);
+ * - error: `closed`, `expired`, `invalid`, `unavailable` (plus `validation` for bad input).
+ */
 export type AnswerResult =
   | { ok: true; status: "authorized" | "rejected" | "identity_mismatch" }
   | { ok: false; code: AnswerErrorCode; fieldErrors?: FieldErrors }
