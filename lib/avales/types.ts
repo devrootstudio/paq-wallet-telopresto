@@ -164,16 +164,21 @@ export type AnswerErrorCode =
   | "invalid"
   /** Storage or identity check unavailable. Safe to retry. */
   | "unavailable"
+  /**
+   * Another answer for this guarantor is being processed right now (another tab, a double click).
+   * The link is still open: show "we are recording another answer, try again in a moment".
+   */
+  | "busy"
   /** The confirmed data or the accepted text failed validation; see `fieldErrors`. */
   | "validation"
   /** @deprecated Former stub answer; no longer returned. */
   | "not_available"
 
 /**
- * Result of `answerGuarantor`. Seven outcomes:
+ * Result of `answerGuarantor`:
  * - ok: `authorized` (accepted and RENAP matches), `rejected` (declined), `identity_mismatch`
  *   (RENAP does not match: the link stays open so the guarantor can correct the data);
- * - error: `closed`, `expired`, `invalid`, `unavailable` (plus `validation` for bad input).
+ * - error: `closed`, `expired`, `invalid`, `unavailable`, `busy` (plus `validation` for bad input).
  */
 export type AnswerResult =
   | { ok: true; status: "authorized" | "rejected" | "identity_mismatch" }
