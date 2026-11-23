@@ -59,6 +59,9 @@ export interface AirtableClientOptions {
   baseId: string
   fetch?: typeof fetch
   timeoutMs?: number
+  /** Retries after a 429, waiting 1 s, 2 s… Default 2. */
+  rateLimitRetries?: number
+  sleep?: (ms: number) => Promise<void>
 }
 
 /** Quotes a value for use inside an Airtable formula string literal. */
@@ -94,6 +97,9 @@ export function createAirtableClient(options: AirtableClientOptions): AirtableCl
   const timeoutMs = options.timeoutMs ?? AIRTABLE_TIMEOUT_MS
   const tableUrl = (table: string) => `${API_URL}/${options.baseId}/${encodeURIComponent(table)}`
 
+  const retries = options.rateLimitRetries ?? 2
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+
   async function request<T>(
     method: string,
     table: string,
@@ -102,20 +108,25 @@ export function createAirtableClient(options: AirtableClientOptions): AirtableCl
     notFoundIsNull = false,
   ): Promise<T | null> {
     let response: Response
-    try {
-      response = await doFetch(url, {
-        method,
-        headers: {
-          Authorization: `Bearer ${options.token}`,
-          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs),
-        cache: "no-store",
-      })
-    } catch (error) {
-      const type = error instanceof Error && error.name === "TimeoutError" ? "TIMEOUT" : "NETWORK"
-      throw new AirtableError(0, type, method, table)
+    for (let attempt = 0; ; attempt++) {
+      try {
+        response = await doFetch(url, {
+          method,
+          headers: {
+            Authorization: `Bearer ${options.token}`,
+            ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal: AbortSignal.timeout(timeoutMs),
+          cache: "no-store",
+        })
+      } catch (error) {
+        const type = error instanceof Error && error.name === "TimeoutError" ? "TIMEOUT" : "NETWORK"
+        throw new AirtableError(0, type, method, table)
+      }
+      // 429 = rate limited (5 requests/s per base): the request was not applied, so retrying is safe.
+      if (response.status !== 429 || attempt >= retries) break
+      await sleep(1000 * 2 ** attempt)
     }
     // Only a single-record read maps 404 to null: on a list, 404 means a wrong base or table.
     if (notFoundIsNull && response.status === 404) return null

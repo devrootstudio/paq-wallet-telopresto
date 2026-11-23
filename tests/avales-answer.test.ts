@@ -191,14 +191,40 @@ describe("answerGuarantor: one answer at a time per guarantor (answer-claim)", (
     expect(await answerGuarantorWith(deps, tokens[0], "reject", blank, META)).toEqual({ ok: true, status: "rejected" })
   })
 
-  it("a claim confirmed too long after the read answers unavailable without calling RENAP", async () => {
+  it("a claim confirmed later than the pause after the read steps back: unavailable, claim freed, retry works", async () => {
     const renap = vi.fn(simulatedRenap)
     const w = world({ renap })
     const reads = [0, 100]
     const deps = { ...w.deps, clock: () => reads.shift() ?? 100, claimSettleMs: 12 }
     expect(await answerGuarantorWith(deps, w.tokens[0], "accept", accept(), META)).toEqual({ ok: false, code: "unavailable" })
     expect(renap).not.toHaveBeenCalled()
+    expect(w.g(1).fields["answer-claim"]).toBe("")
+    expect(await answerGuarantorWith(w.deps, w.tokens[0], "accept", accept(), META)).toEqual({ ok: true, status: "authorized" })
   })
+
+  it("with realistic Airtable latency, two simultaneous accepts register exactly one (regression)", async () => {
+    // Every Airtable call takes 200 ms and the clock is real, as against the live base: the answer
+    // that wins the claim must go on (it used to step back as "too slow" and register nothing).
+    const renap = vi.fn(simulatedRenap)
+    const w = world({ renap })
+    const slow = createAirtableClient({
+      token: "t",
+      baseId: "appTEST0000000000",
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        return w.fake.fetch(url, init)
+      }) as typeof fetch,
+    })
+    const deps = { ...w.deps, airtable: slow, clock: Date.now, claimSettleMs: 1000 }
+    const results = await Promise.all([
+      answerGuarantorWith(deps, w.tokens[0], "accept", accept(), META),
+      answerGuarantorWith(deps, w.tokens[0], "accept", accept(), META),
+    ])
+    expect(results).toContainEqual({ ok: true, status: "authorized" })
+    expect(results).toContainEqual({ ok: false, code: "closed" })
+    expect(renap).toHaveBeenCalledTimes(1)
+    expect(w.g(1).fields.status).toBe("authorized")
+  }, 15_000)
 
   it("an unexpected failure after claiming frees the claim", async () => {
     const renap = vi.fn(async () => Promise.reject(new Error("boom")))

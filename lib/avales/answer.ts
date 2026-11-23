@@ -22,14 +22,17 @@ import type { AnswerResult, GuarantorAnswer, GuarantorAnswerInput } from "./type
  * the evidence, a concurrent answer gets `closed`. The claim is freed when the link stays open
  * (RENAP error, identity mismatch, self-guarantee, unexpected failure) and kept once the guarantor
  * is `authorized` or `rejected`. A claim older than ANSWER_CLAIM_LEASE_MS can be taken over.
- * The pause is shorter than the job's: no money moves here, and the worst case of an unusually slow
- * claim write is a duplicate evidence write, not a duplicate release.
+ * Why it is sound: two answers can only both proceed if one's claim lands more than the pause after
+ * the other's, and a claim lands at most "read that saw no claim + claim write" after that read; an
+ * answer slower than the pause steps back (and frees its claim if it still holds it).
+ * The pause is shorter than the job's: no money moves here. Calls per accept: 7 (2 before the claim),
+ * to stay under Airtable's 5 requests/s with two tabs at once; the client also retries a 429.
  *
  * Privacy: never log the token, names, DPI or phones.
  */
 
 /** Pause between writing the answer claim and re-reading it. */
-export const ANSWER_CLAIM_SETTLE_MS = 1500
+export const ANSWER_CLAIM_SETTLE_MS = 2000
 
 /** Longer than the slowest RENAP check (two authentications and two searches of 25 s). */
 export const ANSWER_CLAIM_LEASE_MS = 120_000
@@ -105,21 +108,17 @@ export async function answerGuarantorWith(
   // The confirmed data cannot be the applicant's nor another guarantor's of this request (no
   // self-guarantee). One generic message on both fields: it must not reveal which data matched whom.
   // The job also counts distinct DPIs for quorum, which covers two forms sent at the same moment.
-  const reusesSomeoneElse = async () => {
-    const others = (await repo.guarantorsOf(found.request.id)).filter((g) => g.id !== id && g.fields.status !== "closed")
-    const r = found.request.fields
+  const reusesSomeoneElse = (rows: AirtableRecord<GuarantorFields>[], request: RequestFields) => {
+    const others = rows.filter((g) => g.id !== id && g.fields.status !== "closed")
     return (
-      confirmed!.identification === r.identification ||
-      confirmed!.phone === r.phone ||
+      confirmed!.identification === request.identification ||
+      confirmed!.phone === request.phone ||
       others.some((g) => g.fields.identification === confirmed!.identification || g.fields.phone === confirmed!.phone)
     )
   }
   const SELF_GUARANTEE = "Estos datos no pueden usarse para avalar esta solicitud"
   const selfGuarantee: AnswerResult = { ok: false, code: "validation", fieldErrors: { identification: SELF_GUARANTEE, phone: SELF_GUARANTEE } }
-  if (answer === "accept") {
-    if (await reusesSomeoneElse()) return selfGuarantee
-    if (!deps.renap) return { ok: false, code: "unavailable" }
-  }
+  if (answer === "accept" && !deps.renap) return { ok: false, code: "unavailable" }
 
   // One answer at a time per guarantor: only the holder of the claim calls RENAP and writes the
   // evidence. A concurrent answer (another tab, a double click) gets `closed`.
@@ -127,25 +126,31 @@ export async function answerGuarantorWith(
   if (existing && !claimExpired(existing, now())) return { ok: false, code: "closed" }
   const claim = `${randomUUID()}@${now().getTime()}`
   await deps.airtable.update(TABLES.guarantors, [{ id, fields: { "answer-claim": claim } }])
-  if (clock() - readAt > settle / 2) {
-    // Too slow to be sure no concurrent claim lands after our re-read: let the guarantor retry.
-    // The claim (if still ours) expires with its lease.
-    return { ok: false, code: "unavailable" }
-  }
-  await sleep(settle)
-  const ownsClaim = async () => {
-    const fresh = await deps.airtable.get<GuarantorFields>(TABLES.guarantors, id)
-    return fresh?.fields["answer-claim"] === claim
-  }
-  if (!(await ownsClaim())) return { ok: false, code: "closed" }
 
-  /** Releases our claim so the guarantor can answer again (link still open). */
+  const holdsClaim = (rows: AirtableRecord<GuarantorFields>[]) => rows.find((g) => g.id === id)?.fields["answer-claim"] === claim
+  /** Frees the claim (and writes `fields`) so the guarantor can answer again: the link stays open. */
   const release = (fields: Record<string, unknown> = {}) =>
     deps.airtable.update(TABLES.guarantors, [{ id, fields: { ...fields, "answer-claim": "" } }])
+  /** Frees the claim only if it is still ours (never another answer's). */
+  const releaseIfOurs = async () => {
+    const fresh = await deps.airtable.get<GuarantorFields>(TABLES.guarantors, id)
+    if (fresh?.fields["answer-claim"] === claim) await release()
+  }
 
   try {
+    // Two concurrent answers both saw no claim and both wrote theirs; the last write wins. An answer
+    // whose read (that saw no claim) and claim write together took longer than the pause cannot be
+    // sure the other's write landed before its re-read: it steps back and frees its claim if it
+    // still holds it, so the guarantor can simply try again.
+    if (clock() - readAt > settle) {
+      await releaseIfOurs()
+      return { ok: false, code: "unavailable" }
+    }
+    await sleep(settle)
+    let rows = await repo.guarantorsOf(found.request.id)
+    if (!holdsClaim(rows)) return { ok: false, code: "closed" }
+
     if (answer === "reject") {
-      if (!(await ownsClaim())) return { ok: false, code: "closed" }
       // The claim stays: the link no longer takes answers.
       await deps.airtable.update(TABLES.guarantors, [
         { id, fields: { status: "rejected" satisfies GuarantorStatus, "answered-at": at, evidence: evidence({}) } },
@@ -153,17 +158,24 @@ export async function answerGuarantorWith(
       return { ok: true, status: "rejected" }
     }
 
+    if (reusesSomeoneElse(rows, found.request.fields)) {
+      await release()
+      return selfGuarantee
+    }
+
     const check = await deps.renap!(confirmed!)
     const renapFields = { "renap-result": check.result, "renap-raw": truncate(JSON.stringify(check.raw ?? null)) }
 
     // RENAP may take seconds: re-read, and write nothing if the link stopped taking answers
     // meanwhile, the claim was lost, or another guarantor confirmed the same data in the meantime.
-    const again = await repo.findByToken(token)
-    if (!again) return { ok: false, code: "invalid" }
-    const changed = linkState(again)
+    rows = await repo.guarantorsOf(found.request.id)
+    const me = rows.find((g) => g.id === id)
+    const request = await deps.airtable.get<RequestFields>(TABLES.requests, found.request.id)
+    if (!me || !request) return { ok: false, code: "invalid" }
+    const changed = linkState({ guarantor: me, request })
     if (changed) return changed
-    if (again.guarantor.fields["answer-claim"] !== claim) return { ok: false, code: "closed" }
-    if (await reusesSomeoneElse()) {
+    if (!holdsClaim(rows)) return { ok: false, code: "closed" }
+    if (reusesSomeoneElse(rows, request.fields)) {
       await release()
       return selfGuarantee
     }
@@ -197,8 +209,9 @@ export async function answerGuarantorWith(
     ])
     return { ok: true, status: "authorized" }
   } catch (error) {
-    // Unexpected failure after claiming: free the claim (best effort) so a retry is not stuck on `closed`.
-    await release().catch(() => undefined)
+    // Unexpected failure after claiming: free the claim if still ours (best effort) so a retry is
+    // not stuck on `closed`.
+    await releaseIfOurs().catch(() => undefined)
     throw error
   }
 }

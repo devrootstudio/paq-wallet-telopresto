@@ -146,7 +146,7 @@ describe("submitGuarantorRequest", () => {
   })
 
   it("a partial failure answers unavailable and the retry completes it", async () => {
-    fake.failOn("PATCH", "guarantors", 429)
+    fake.failOn("PATCH", "guarantors", 503)
     expect(await submitGuarantorRequest(input())).toEqual({ ok: false, code: "unavailable" })
     const retry = await submitGuarantorRequest(input())
     expect(retry).toMatchObject({ ok: true, reused: true, open: true })
