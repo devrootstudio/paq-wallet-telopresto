@@ -169,6 +169,7 @@ test("doble aceptación simultánea: un solo desembolso", async ({ page, request
       return (await tab.getByText(BUSY).count()) > 0 ? "busy" : "closed"
     }),
   )
+  console.log(`[e2e] same-guarantor tabs: ${screens.join(" + ")}`)
   expect(screens.filter((s) => s === "thanks")).toHaveLength(1)
   expect(["busy", "closed"]).toContain(screens.find((s) => s !== "thanks"))
   expect((await state(request, auth)).guarantors?.[0].status).toBe("authorized")
