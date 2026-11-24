@@ -14,7 +14,7 @@ vi.mock("axios", () => ({ default: { post: vi.fn(async () => ({})), isAxiosError
 
 import axios from "axios"
 import { submitStep1Form } from "@/app/actions"
-import { EMPRESAS_GT, EMPRESA_OTRA, validarEmpresaOtra } from "@/lib/empresas"
+import { EMPRESAS_GT, EMPRESA_OTRA, cambioDeEmpresa, normalizarTexto, validarEmpresaOtra } from "@/lib/empresas"
 import { useWizardStore } from "@/lib/store"
 import { handleStep1Submit } from "@/lib/step-handlers"
 import { sendToMakeWebhook } from "@/lib/make-integration"
@@ -58,6 +58,46 @@ describe("empresa 'Otra': list and validation", () => {
       empresa: "Escribe el nombre de la empresa",
       empresaTelefono: "El teléfono de la empresa debe tener 8 dígitos",
       empresaDireccion: "Ingresa la dirección completa de la empresa",
+    })
+  })
+})
+
+describe("empresa 'Otra': same measure as the server", () => {
+  it("an address that is short once inner spaces collapse is rejected in Step 1, as the server would", () => {
+    // "Zona  1  A" is 10 characters raw but 8 normalized: the server rejects it in Step 3b.
+    expect(validarEmpresaOtra({ ...OTRA, empresaDireccion: "Zona  1  A" }).empresaDireccion).toBe(
+      "Ingresa la dirección completa de la empresa",
+    )
+    expect(validarEmpresaOtra({ ...OTRA, empresaDireccion: "  Zona   10, Mixco  " })).toEqual({})
+    expect(normalizarTexto("  Zona   10,\tMixco  ")).toBe("Zona 10, Mixco")
+  })
+
+  it("what Step 1 accepts, the guarantor request accepts too", () => {
+    const address = "  4a.  Calle   5-67  "
+    expect(validarEmpresaOtra({ ...OTRA, empresaDireccion: address })).toEqual({})
+    const input = buildGuarantorRequest(
+      {
+        ...real().formData, ...step1, ...OTRA, empresaDireccion: address, autorizacion: "auth-123456",
+        idSolicitud: "TEST-001", approvedAmount: 3500, requestedAmount: 2500, disbursementAmount: 2290,
+      },
+      [
+        { fullName: "Aval Uno Prueba", identification: "1000000000101", phone: "10000001", relationship: "hermano/a" },
+        { fullName: "Aval Dos Prueba", identification: "1000000000202", phone: "10000002", relationship: "amigo/a" },
+        { fullName: "Aval Tres Prueba", identification: "1000000000303", phone: "10000003", relationship: "otro" },
+      ],
+    )
+    expect(input.applicant.companyAddress).toBe("4a. Calle 5-67")
+    expect(validateGuarantors(input)).toEqual({})
+  })
+})
+
+describe("company select", () => {
+  it("'Otra' starts with an empty name; going back to a listed company clears the 'Otra' fields", () => {
+    expect(cambioDeEmpresa(EMPRESA_OTRA.value)).toEqual({ empresaOtra: true, empresa: "" })
+    real().updateFormData(OTRA)
+    real().updateFormData(cambioDeEmpresa(EMPRESAS_GT[1].label))
+    expect(real().formData).toMatchObject({
+      empresa: EMPRESAS_GT[1].label, empresaOtra: false, empresaTelefono: "", empresaDireccion: "",
     })
   })
 })

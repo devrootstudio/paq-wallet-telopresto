@@ -25,7 +25,23 @@ export const EMPRESA_OTRA_MENSAJES = {
   direccion: "Ingresa la dirección completa de la empresa",
 } as const
 
-/** Validation of the "Otra" company fields; empty object when valid or when "Otra" is not picked. */
+/** Trims and collapses inner whitespace, as the guarantor request does before the server checks lengths. */
+export const normalizarTexto = (value: string) => value.trim().replace(/\s+/g, " ")
+
+/**
+ * Store update when the company select changes: "Otra" starts with an empty name to type; a listed
+ * company clears the "Otra" fields.
+ */
+export function cambioDeEmpresa(value: string) {
+  return value === EMPRESA_OTRA.value
+    ? { empresaOtra: true, empresa: "" }
+    : { empresaOtra: false, empresa: value, empresaTelefono: "", empresaDireccion: "" }
+}
+
+/**
+ * Validation of the "Otra" company fields; empty object when valid or when "Otra" is not picked.
+ * Lengths are measured on the normalized text, exactly as Step 3b sends it and the server checks it.
+ */
 export function validarEmpresaOtra(data: {
   empresaOtra: boolean
   empresa: string
@@ -34,10 +50,10 @@ export function validarEmpresaOtra(data: {
 }): Partial<Record<"empresa" | "empresaTelefono" | "empresaDireccion", string>> {
   if (!data.empresaOtra) return {}
   const errors: Partial<Record<"empresa" | "empresaTelefono" | "empresaDireccion", string>> = {}
-  const nombre = data.empresa.trim()
+  const nombre = normalizarTexto(data.empresa)
   if (nombre.length < 1 || nombre.length > 200) errors.empresa = EMPRESA_OTRA_MENSAJES.nombre
   if (!/^\d{8}$/.test(data.empresaTelefono.replace(/[\s-]/g, ""))) errors.empresaTelefono = EMPRESA_OTRA_MENSAJES.telefono
-  const direccion = data.empresaDireccion.trim()
+  const direccion = normalizarTexto(data.empresaDireccion)
   if (direccion.length < 10 || direccion.length > 300) errors.empresaDireccion = EMPRESA_OTRA_MENSAJES.direccion
   return errors
 }

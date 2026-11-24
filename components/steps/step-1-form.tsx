@@ -8,7 +8,7 @@ import { ChevronDown } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { handleStep1Submit } from "@/lib/step-handlers"
-import { EMPRESAS_GT, EMPRESA_OTRA, SECTORES, validarEmpresaOtra } from "@/lib/empresas"
+import { EMPRESAS_GT, EMPRESA_OTRA, SECTORES, cambioDeEmpresa, normalizarTexto, validarEmpresaOtra } from "@/lib/empresas"
 
 // Helper component for tooltips
 export const ErrorTooltip = ({ message }: { message: string }) => {
@@ -352,11 +352,7 @@ export default function Step1Form() {
 
   // Picking a company from the list or "Otra" (then the name is typed below and goes to the contract)
   const handleEmpresaSelect = (value: string) => {
-    if (value === EMPRESA_OTRA.value) {
-      updateFormData({ empresaOtra: true, empresa: "" })
-    } else {
-      updateFormData({ empresaOtra: false, empresa: value, empresaTelefono: "", empresaDireccion: "" })
-    }
+    updateFormData(cambioDeEmpresa(value))
     setErrors((prev) => {
       const next = { ...prev }
       delete next.empresa
@@ -421,7 +417,12 @@ export default function Step1Form() {
                   placeholder="Nombre de tu empresa"
                   value={formData.empresa}
                   onChange={(e) => handleChange("empresa", e.target.value)}
-                  onBlur={(e) => handleBlur("empresa", e.target.value)}
+                  onBlur={(e) => {
+                    // Stored trimmed: this name goes to the contract and the pagaré.
+                    const nombre = normalizarTexto(e.target.value)
+                    updateFormData({ empresa: nombre })
+                    handleBlur("empresa", nombre)
+                  }}
                   className={cn("h-11", errors.empresa && "border-red-500 focus-visible:ring-red-500")}
                   maxLength={200}
                 />
@@ -457,7 +458,11 @@ export default function Step1Form() {
                   placeholder="Calle, número, zona y municipio"
                   value={formData.empresaDireccion}
                   onChange={(e) => handleChange("empresaDireccion", e.target.value)}
-                  onBlur={(e) => handleBlur("empresaDireccion", e.target.value)}
+                  onBlur={(e) => {
+                    const direccion = normalizarTexto(e.target.value)
+                    updateFormData({ empresaDireccion: direccion })
+                    handleBlur("empresaDireccion", direccion)
+                  }}
                   className={cn("h-11", errors.empresaDireccion && "border-red-500 focus-visible:ring-red-500")}
                   maxLength={300}
                 />
