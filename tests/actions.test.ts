@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { cookieJar } from "./setup"
 
-// Paq SOAP services, the Make webhook and PDFMonkey are external: mock them at
+// Paq SOAP services, the applications record (Airtable) and PDFMonkey are external: mock them at
 // the module boundary so the tests pin the flow logic of app/actions.ts.
 vi.mock("@/lib/soap-client", () => ({
   queryClient: vi.fn(),
@@ -12,11 +12,11 @@ vi.mock("@/lib/soap-client", () => ({
   registerClient: vi.fn(),
   editClient: vi.fn(),
 }))
-vi.mock("@/lib/make-integration", () => ({ sendToMakeWebhook: vi.fn(async () => undefined) }))
+vi.mock("@/lib/applications", () => ({ recordApplication: vi.fn(async () => undefined) }))
 vi.mock("@/lib/pagare", () => ({ generarPagare: vi.fn(async () => "https://pdf.example/pagare.pdf") }))
 
 import * as soap from "@/lib/soap-client"
-import { sendToMakeWebhook } from "@/lib/make-integration"
+import { recordApplication } from "@/lib/applications"
 import { generarPagare } from "@/lib/pagare"
 import { clearMemoryReleaseStore } from "@/lib/release"
 import {
@@ -134,7 +134,7 @@ describe("step 1 · form (Registra/Edita_Cliente + Envia_Token_TyC)", () => {
     expect(soap.sendTokenTyc).not.toHaveBeenCalled()
   })
 
-  it("create: registers the client (salary without commas), notifies Make and sends the SMS", async () => {
+  it("create: registers the client (salary without commas), records Step 1 and sends the SMS", async () => {
     m(soap.registerClient).mockResolvedValue({ returnCode: 0, message: "ok", idCliente: 77 })
     m(soap.sendTokenTyc).mockResolvedValue({ returnCode: 0 })
     const r = await submitStep1Form({ ...step1Data, nextAction: "create" })
@@ -142,7 +142,8 @@ describe("step 1 · form (Registra/Edita_Cliente + Envia_Token_TyC)", () => {
       "2456789010101", "Cliente de Prueba", PHONE, "cliente@example.com", "1234567", 5000, "mensual",
     )
     expect(soap.editClient).not.toHaveBeenCalled()
-    expect(sendToMakeWebhook).toHaveBeenCalledWith(1, expect.anything(), expect.objectContaining({ returnCode: 0 }), true, "auth-123")
+    expect(recordApplication).toHaveBeenCalledWith("auth-123", { step: "paso1", data: expect.anything(), client: expect.objectContaining({ returnCode: 0 }) }, { test: false })
+    expect(m(recordApplication).mock.calls.map((c) => c[1].step)).toEqual(["paso1", "otp-enviado"])
     expect(soap.sendTokenTyc).toHaveBeenCalledWith(PHONE)
     expect(r).toEqual({ success: true })
   })
@@ -157,20 +158,20 @@ describe("step 1 · form (Registra/Edita_Cliente + Envia_Token_TyC)", () => {
     expect(r.success).toBe(true)
   })
 
-  it("continue: skips create/edit but still notifies Make and sends the SMS", async () => {
+  it("continue: skips create/edit but still records Step 1 and sends the SMS", async () => {
     m(soap.sendTokenTyc).mockResolvedValue({ returnCode: 0 })
     const r = await submitStep1Form({ ...step1Data, nextAction: "continue" })
     expect(soap.registerClient).not.toHaveBeenCalled()
     expect(soap.editClient).not.toHaveBeenCalled()
-    expect(sendToMakeWebhook).toHaveBeenCalledTimes(1)
+    expect(m(recordApplication).mock.calls.map((c) => c[1].step)).toEqual(["paso1", "otp-enviado"])
     expect(r).toEqual({ success: true })
   })
 
-  it("create rejected by the service: general error and Make notified as failed", async () => {
+  it("create rejected by the service: general error and Step 1 recorded as failed", async () => {
     m(soap.registerClient).mockResolvedValue({ returnCode: 9, message: "DPI inválido" })
     const r = await submitStep1Form({ ...step1Data, nextAction: "create" })
     expect(r).toEqual({ success: false, error: "DPI inválido", errorType: "general" })
-    expect(sendToMakeWebhook).toHaveBeenCalledWith(1, expect.anything(), null, false, "auth-123")
+    expect(recordApplication).toHaveBeenCalledWith("auth-123", { step: "paso1", data: expect.anything(), client: null, error: { message: "DPI inválido", code: 9 } }, { test: false })
     expect(soap.sendTokenTyc).not.toHaveBeenCalled()
   })
 

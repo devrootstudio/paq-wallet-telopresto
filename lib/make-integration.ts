@@ -1,3 +1,9 @@
+/**
+ * @deprecated The app no longer calls Make: Step 1 and the following steps write the
+ * `applications` table directly (lib/applications.ts), one record per authorization.
+ * MAKE_WEBHOOK_URL and MAKE_WEBHOOK_API_KEY are no longer used. This file stays only because a
+ * Step 1 UI test still exercises it; delete it together with that test case.
+ */
 import axios from "axios"
 import type { QueryClientResponse } from "./soap-client"
 
