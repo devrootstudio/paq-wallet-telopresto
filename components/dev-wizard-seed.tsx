@@ -8,6 +8,7 @@ import { useWizardStore } from "@/lib/store"
  * Development-only: seed wizard step via ?devStep=0..5 for screenshots / QA.
  * Aval route: ?devStep=3b (guarantors form) and ?devStep=3c ("en revisión").
  * Optional ?ruta=aval|normal forces the Step 3 route instead of asking the server.
+ * Optional ?empresa=otra seeds the "Otra" company (typed name, phone and address) instead of a listed one.
  * Not used in production builds.
  */
 export function DevWizardSeed() {
@@ -76,6 +77,15 @@ export function DevWizardSeed() {
         edad: demo.edad,
         estadoCivil: demo.estadoCivil,
         domicilio: demo.domicilio,
+        ...(searchParams.get("empresa") === "otra"
+          ? {
+              empresa: "Comercial Ejemplo, S.A.",
+              empresaOtra: true,
+              // Prefix 1: not assigned to Guatemalan numbers
+              empresaTelefono: "19000002",
+              empresaDireccion: "4a. Calle 5-67, Zona 1, Ciudad de Guatemala",
+            }
+          : {}),
         clientId: "",
         nextAction: "continue",
       })

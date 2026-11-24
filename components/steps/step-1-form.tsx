@@ -8,7 +8,7 @@ import { ChevronDown } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { handleStep1Submit } from "@/lib/step-handlers"
-import { EMPRESAS_GT, SECTORES } from "@/lib/empresas"
+import { EMPRESAS_GT, EMPRESA_OTRA, SECTORES, validarEmpresaOtra } from "@/lib/empresas"
 
 // Helper component for tooltips
 export const ErrorTooltip = ({ message }: { message: string }) => {
@@ -101,9 +101,19 @@ export default function Step1Form() {
         break
       }
       case "empresa": {
-        if (!value) {
+        if (formData.empresaOtra) {
+          error = validarEmpresaOtra({ ...formData, empresa: value }).empresa ?? ""
+        } else if (!value) {
           error = "Selecciona tu empresa"
         }
+        break
+      }
+      case "empresaTelefono": {
+        error = validarEmpresaOtra({ ...formData, empresaTelefono: value }).empresaTelefono ?? ""
+        break
+      }
+      case "empresaDireccion": {
+        error = validarEmpresaOtra({ ...formData, empresaDireccion: value }).empresaDireccion ?? ""
         break
       }
       case "edad": {
@@ -162,6 +172,12 @@ export default function Step1Form() {
       { name: "salary", value: formData.salary },
       { name: "paymentFrequency", value: formData.paymentFrequency },
       { name: "empresa", value: formData.empresa },
+      ...(formData.empresaOtra
+        ? [
+            { name: "empresaTelefono", value: formData.empresaTelefono },
+            { name: "empresaDireccion", value: formData.empresaDireccion },
+          ]
+        : []),
       { name: "edad", value: formData.edad },
       { name: "estadoCivil", value: formData.estadoCivil },
       { name: "domicilio", value: formData.domicilio },
@@ -196,6 +212,9 @@ export default function Step1Form() {
         salary: formData.salary,
         paymentFrequency: formData.paymentFrequency,
         empresa: formData.empresa,
+        empresaOtra: formData.empresaOtra,
+        empresaTelefono: formData.empresaTelefono,
+        empresaDireccion: formData.empresaDireccion,
         edad: formData.edad,
         estadoCivil: formData.estadoCivil,
         domicilio: formData.domicilio,
@@ -328,8 +347,28 @@ export default function Step1Form() {
       hasError && "border-red-500 focus-visible:ring-red-500",
     )
 
-  // Gate: all other fields stay disabled until an empresa is selected
-  const empresaSelected = Boolean(formData.empresa)
+  // Gate: all other fields stay disabled until an empresa is selected (or "Otra")
+  const empresaSelected = Boolean(formData.empresa) || formData.empresaOtra
+
+  // Picking a company from the list or "Otra" (then the name is typed below and goes to the contract)
+  const handleEmpresaSelect = (value: string) => {
+    if (value === EMPRESA_OTRA.value) {
+      updateFormData({ empresaOtra: true, empresa: "" })
+    } else {
+      updateFormData({ empresaOtra: false, empresa: value, empresaTelefono: "", empresaDireccion: "" })
+    }
+    setErrors((prev) => {
+      const next = { ...prev }
+      delete next.empresa
+      delete next.empresaTelefono
+      delete next.empresaDireccion
+      return next
+    })
+  }
+
+  const handleEmpresaTelefonoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    handleChange("empresaTelefono", e.target.value.replace(/\D/g, "").slice(0, 8))
+  }
 
   return (
     <div className="w-full max-w-xl mx-auto px-4 py-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -344,9 +383,10 @@ export default function Step1Form() {
           <label className="text-white text-xs font-medium ml-1">Empresa</label>
           <div className="relative">
             <select
-              className={selectClass(!!errors.empresa)}
-              value={formData.empresa}
-              onChange={(e) => { handleChange("empresa", e.target.value); handleBlur("empresa", e.target.value) }}
+              // With "Otra" the empresa error belongs to the typed name below, not to the select.
+              className={selectClass(!!errors.empresa && !formData.empresaOtra)}
+              value={formData.empresaOtra ? EMPRESA_OTRA.value : formData.empresa}
+              onChange={(e) => handleEmpresaSelect(e.target.value)}
             >
               <option value="" disabled hidden>Selecciona tu empresa</option>
               {SECTORES.map((sector) => (
@@ -356,9 +396,10 @@ export default function Step1Form() {
                   ))}
                 </optgroup>
               ))}
+              <option value={EMPRESA_OTRA.value}>{EMPRESA_OTRA.label}</option>
             </select>
             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" />
-            {errors.empresa && <ErrorTooltip message={errors.empresa} />}
+            {errors.empresa && !formData.empresaOtra && <ErrorTooltip message={errors.empresa} />}
           </div>
           {!empresaSelected && (
             <p className="text-paq-yellow text-xs ml-1 mt-1">
@@ -366,6 +407,65 @@ export default function Step1Form() {
             </p>
           )}
         </div>
+
+        {/* "Otra": the company is not in the list */}
+        {formData.empresaOtra && (
+          <div className="space-y-3 rounded-lg border border-white/20 p-3">
+            <div className="relative space-y-1">
+              <label htmlFor="empresa-otra-nombre" className="text-white text-xs font-medium ml-1">
+                Nombre de la empresa
+              </label>
+              <div className="relative">
+                <Input
+                  id="empresa-otra-nombre"
+                  placeholder="Nombre de tu empresa"
+                  value={formData.empresa}
+                  onChange={(e) => handleChange("empresa", e.target.value)}
+                  onBlur={(e) => handleBlur("empresa", e.target.value)}
+                  className={cn("h-11", errors.empresa && "border-red-500 focus-visible:ring-red-500")}
+                  maxLength={200}
+                />
+                {errors.empresa && <ErrorTooltip message={errors.empresa} />}
+              </div>
+            </div>
+            <div className="relative space-y-1">
+              <label htmlFor="empresa-otra-telefono" className="text-white text-xs font-medium ml-1">
+                Teléfono de la empresa
+              </label>
+              <div className="relative">
+                <Input
+                  id="empresa-otra-telefono"
+                  placeholder="0000 0000"
+                  type="tel"
+                  inputMode="numeric"
+                  value={formatPhone(formData.empresaTelefono)}
+                  onChange={handleEmpresaTelefonoChange}
+                  onBlur={() => handleBlur("empresaTelefono", formData.empresaTelefono)}
+                  className={cn("h-11", errors.empresaTelefono && "border-red-500 focus-visible:ring-red-500")}
+                  maxLength={9}
+                />
+                {errors.empresaTelefono && <ErrorTooltip message={errors.empresaTelefono} />}
+              </div>
+            </div>
+            <div className="relative space-y-1">
+              <label htmlFor="empresa-otra-direccion" className="text-white text-xs font-medium ml-1">
+                Dirección de la empresa
+              </label>
+              <div className="relative">
+                <Input
+                  id="empresa-otra-direccion"
+                  placeholder="Calle, número, zona y municipio"
+                  value={formData.empresaDireccion}
+                  onChange={(e) => handleChange("empresaDireccion", e.target.value)}
+                  onBlur={(e) => handleBlur("empresaDireccion", e.target.value)}
+                  className={cn("h-11", errors.empresaDireccion && "border-red-500 focus-visible:ring-red-500")}
+                  maxLength={300}
+                />
+                {errors.empresaDireccion && <ErrorTooltip message={errors.empresaDireccion} />}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Fila 1: DPI — ancho completo */}
         <div className="relative space-y-1">

@@ -112,6 +112,10 @@ export function buildGuarantorRequest(formData: Store["formData"], guarantors: G
       age: clip(formData.edad, MAX.age),
       maritalStatus: clip(formData.estadoCivil, MAX.maritalStatus),
       address: clip(formData.domicilio, MAX.address),
+      // "Otra" company: phone and address are required by the schema only in that case.
+      companyOther: formData.empresaOtra,
+      companyPhone: formData.empresaOtra ? digits(formData.empresaTelefono) : "",
+      companyAddress: formData.empresaOtra ? clip(formData.empresaDireccion, MAX.address) : "",
     },
     // valida_cupo may hand it over as a number: the contract stores text.
     cupoId: String(formData.idSolicitud ?? ""),
