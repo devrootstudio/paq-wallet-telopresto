@@ -254,16 +254,50 @@ describe("old duplicates sharing the authorization", () => {
 })
 
 describe("recordApplication never throws, never retries, and reports failure", () => {
-  it("a failed write is not retried: returns false; logs carry no personal data", async () => {
+  it("a failed write of a later step is not retried: returns false; logs carry no personal data", async () => {
     const logs: string[] = []
     vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void logs.push(a.join(" ")))
     fake.failOn("PATCH", APPLICATIONS_TABLE, 500)
-    expect(await recordApplication(AUTH, { step: "paso1", data: step1, client }, deps())).toBe(false)
+    expect(await recordApplication(AUTH, { step: "otp-enviado" }, deps())).toBe(false)
     expect(upserts()).toHaveLength(1)
     expect(rows()).toHaveLength(0)
     const all = logs.join("\n")
-    expect(all).toContain(`[applications] paso1 ${AUTH.slice(0, 6)}… write failed: 500`)
+    expect(all).toContain(`[applications] otp-enviado ${AUTH.slice(0, 6)}… write failed: 500`)
+    expect(all).not.toContain(AUTH)
+  })
+
+  it("Step 1 retries its write once (5xx), and gives up after the second failure; no personal data in logs", async () => {
+    const logs: string[] = []
+    vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void logs.push(a.join(" ")))
+    fake.failOn("PATCH", APPLICATIONS_TABLE, 500)
+    expect(await recordApplication(AUTH, { step: "paso1", data: step1, client }, deps())).toBe(true)
+    expect(upserts()).toHaveLength(2)
+    expect(rows()[0].fields).toMatchObject({ step: "paso1", attempts: 1 })
+
+    fake.failOn("PATCH", APPLICATIONS_TABLE, 500)
+    fake.failOn("PATCH", APPLICATIONS_TABLE, 503)
+    expect(await recordApplication(AUTH, { step: "paso1", data: step1, client }, deps())).toBe(false)
+    expect(upserts()).toHaveLength(4)
+    const all = logs.join("\n")
+    expect(all).toContain(`[applications] paso1 ${AUTH.slice(0, 6)}… write failed, retrying: 500`)
+    expect(all).toContain(`[applications] paso1 ${AUTH.slice(0, 6)}… write failed: 503`)
     for (const pii of ["3000000000101", "55550101", "Cliente Ficticio", "cliente@example.com", AUTH]) expect(all).not.toContain(pii)
+  })
+
+  it("Step 1 is not retried on a 4xx (not a transient error)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    fake.failOn("PATCH", APPLICATIONS_TABLE, 422)
+    expect(await recordApplication(AUTH, { step: "paso1", data: step1, client }, deps())).toBe(false)
+    expect(upserts()).toHaveLength(1)
+  })
+
+  it("a later event carrying step1 (its Step 1 write failed) writes the Step 1 data too", async () => {
+    await recordApplication(AUTH, { step: "otp-enviado", step1: { data: step1, client } }, deps())
+    expect(rows()[0].fields).toMatchObject({ step: "otp-enviado", name: "Cliente Ficticio Prueba", "start-date": "2024-03-15", salary: 5250.5, company: "Empresa de la Lista", "ws-code": "0" })
+    await recordApplication(AUTH, { step: "cupo-validado", approvedAmount: 900, step1: { data: step1, client } }, deps())
+    expect(rows()[0].fields).toMatchObject({ step: "cupo-validado", "approved-amount": 900, name: "Cliente Ficticio Prueba" })
+    await recordApplication(AUTH, { step: "error", errorStep: "otp", error: { message: "x" }, step1: { data: step1, client } }, deps())
+    expect(rows()[0].fields).toMatchObject({ step: "error", name: "Cliente Ficticio Prueba" })
   })
 
   it("if reading attempts fails, Step 1 is still written (without attempts)", async () => {
@@ -292,6 +326,63 @@ describe("recordApplication never throws, never retries, and reports failure", (
       vi.unstubAllGlobals()
       vi.unstubAllEnvs()
     }
+  })
+
+  describe("cold start (default client, real timers)", () => {
+    // A fetch that is slow or hangs on chosen calls and otherwise answers like Airtable.
+    function coldFetch(rule: (method: string, call: number) => "hang" | "timeout" | "ok") {
+      let call = 0
+      return (async (url: string | URL | Request, init?: RequestInit) => {
+        const method = init?.method ?? "GET"
+        const behavior = rule(method, ++call)
+        if (behavior === "timeout") throw Object.assign(new Error("timed out"), { name: "TimeoutError" })
+        if (behavior === "hang") {
+          return new Promise<Response>((_resolve, reject) => {
+            if (init?.signal?.aborted) return reject(init.signal.reason)
+            init?.signal?.addEventListener("abort", () => reject(init.signal!.reason))
+          })
+        }
+        return fake.fetch(url, init)
+      }) as typeof fetch
+    }
+    const withEnv = async (fetchImpl: typeof fetch, run: () => Promise<void>) => {
+      vi.stubEnv("AIRTABLE_TOKEN", "test-airtable-token")
+      vi.stubEnv("AIRTABLE_BASE_ID", "appTEST0000000000")
+      vi.stubGlobal("fetch", fetchImpl)
+      vi.spyOn(console, "error").mockImplementation(() => {})
+      try {
+        await run()
+      } finally {
+        vi.unstubAllGlobals()
+        vi.unstubAllEnvs()
+      }
+    }
+
+    it("Step 1: the first write times out, the retry gets in", async () => {
+      // Call 1 = attempts read (ok), call 2 = first write (timeout), call 3 = retry (ok).
+      await withEnv(coldFetch((_m, n) => (n === 2 ? "timeout" : "ok")), async () => {
+        expect(await recordApplication(AUTH, { step: "paso1", data: step1, client })).toBe(true)
+        expect(rows()[0].fields).toMatchObject({ step: "paso1", attempts: 1, name: "Cliente Ficticio Prueba" })
+      })
+    })
+
+    it("Step 1: a hanging attempts read is cut at ~3 s and the write still gets in within the 8 s budget", async () => {
+      await withEnv(coldFetch((m) => (m === "GET" ? "hang" : "ok")), async () => {
+        const started = Date.now()
+        expect(await recordApplication(AUTH, { step: "paso1", data: step1, client })).toBe(true)
+        const elapsed = Date.now() - started
+        expect(elapsed).toBeGreaterThanOrEqual(2900)
+        expect(elapsed).toBeLessThan(8000)
+        expect(rows()[0].fields).toMatchObject({ step: "paso1", name: "Cliente Ficticio Prueba" })
+        expect(rows()[0].fields.attempts).toBeUndefined()
+      })
+    }, 12_000)
+
+    it("later steps keep the 3 s budget and no retry", async () => {
+      await withEnv(coldFetch(() => "timeout"), async () => {
+        expect(await recordApplication(AUTH, { step: "otp-enviado" })).toBe(false)
+      })
+    })
   })
 
   it("missing or malformed authorization, or no storage configured: nothing is written, false", async () => {

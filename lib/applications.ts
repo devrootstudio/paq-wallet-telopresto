@@ -12,15 +12,29 @@ import type { QueryClientResponse } from "@/lib/soap-client"
  * date, a malformed email) are left out instead of failing the whole write.
  *
  * Callers await it (so the Step 1 record exists before the next event), so it is time-boxed:
- * at most WRITE_BUDGET_MS in total, no retries (not even on a 429). It never throws: a failed write
- * is logged with the step, the status, the Airtable error type and a short authorization prefix
- * (never personal data or the token), and reported by returning false.
+ * - every step: at most WRITE_BUDGET_MS in total, no retries (not even on a 429);
+ * - Step 1: STEP1_BUDGET_MS in total (it runs before the SMS, while the user sees the loader, and
+ *   the first Airtable call of a cold server can take seconds), with the attempts read capped at
+ *   ATTEMPTS_READ_MAX_MS, each write capped at WRITE_ATTEMPT_MAX_MS, and ONE retry of the write on a
+ *   timeout, network error or 5xx if time is left.
+ * If Step 1 still fails, the caller passes its data again with the next event of the same request
+ * (`step1` on otp-enviado / cupo-validado / error), so the record never ends up without it.
+ * It never throws: a failed write is logged with the step, the status, the Airtable error type and
+ * a short authorization prefix (never personal data or the token), and reported by returning false.
  */
 
 export const APPLICATIONS_TABLE = "applications"
 
 /** Total time one recordApplication call may take (all its Airtable requests together). */
 export const WRITE_BUDGET_MS = 3000
+/** Total time for Step 1 (attempts read + write + one retry). */
+export const STEP1_BUDGET_MS = 8000
+/** The Step 1 attempts read may not eat the whole budget. */
+export const ATTEMPTS_READ_MAX_MS = 3000
+/** Each Step 1 write attempt, so a slow first one leaves time for the retry. */
+export const WRITE_ATTEMPT_MAX_MS = 4000
+/** A retry is only started with at least this much budget left. */
+const MIN_RETRY_MS = 500
 
 export type ApplicationStep = "paso1" | "otp-enviado" | "otp-validado" | "cupo-validado" | "desembolsado" | "error"
 export type ApplicationErrorStep = "paso1" | "otp" | "cupo" | "desembolso"
@@ -53,26 +67,32 @@ export interface StepError {
 export type ApplicationPatch =
   /** Step 1 submitted: its data, the client response (if any) and, when creating/editing the client failed, the error. */
   | { step: "paso1"; data: Step1Data; client: QueryClientResponse | null; error?: StepError }
-  /** OTP SMS sent (code 0). */
-  | { step: "otp-enviado" }
+  /** OTP SMS sent (code 0). `step1`: Step 1 data again, when its own write failed in this request. */
+  | { step: "otp-enviado"; step1?: Step1Snapshot }
   /** Cupo validated; `otpValidated` when the OTP was validated in the same call (Step 2). */
-  | { step: "cupo-validado"; approvedAmount?: number; cupoId?: string; otpValidated?: boolean }
+  | { step: "cupo-validado"; approvedAmount?: number; cupoId?: string; otpValidated?: boolean; step1?: Step1Snapshot }
   /** Disbursement done. */
   | { step: "desembolsado"; requestedAmount?: number; commission?: number; code: string | number; message?: string }
   /**
    * A step failed: only step, last-error-step and last-error are written, so an error never
    * overwrites data of an earlier success (e.g. the disbursement code). `otpValidated` when the
-   * OTP had been validated before the failure (Step 2).
+   * OTP had been validated before the failure (Step 2). `step1`: as above.
    */
-  | { step: "error"; errorStep: ApplicationErrorStep; error: StepError; otpValidated?: boolean }
+  | { step: "error"; errorStep: ApplicationErrorStep; error: StepError; otpValidated?: boolean; step1?: Step1Snapshot }
+
+/** Step 1 data and client response, resent with a later event when the Step 1 write failed. */
+export interface Step1Snapshot {
+  data: Step1Data
+  client: QueryClientResponse | null
+}
 
 export interface RecordOptions {
   /** ENABLE_TEST_BYPASS: mark the record as test data. */
   test?: boolean
-  /** Defaults to a client from AIRTABLE_TOKEN / AIRTABLE_BASE_ID limited to WRITE_BUDGET_MS. */
+  /** Defaults to a time-boxed client from AIRTABLE_TOKEN / AIRTABLE_BASE_ID. */
   airtable?: AirtableClient | null
   now?: () => Date
-  /** Total time budget for the default client. Default WRITE_BUDGET_MS. */
+  /** Total time budget. Default STEP1_BUDGET_MS for Step 1, WRITE_BUDGET_MS otherwise. */
   budgetMs?: number
 }
 
@@ -175,8 +195,19 @@ function step1Fields(data: Step1Data, client: QueryClientResponse | null): Recor
   }
 }
 
-/** The fields one event writes (besides authorization, updated-at and test). */
+/**
+ * The fields one event writes (besides authorization, updated-at and test). An event that carries
+ * `step1` (its Step 1 write failed earlier in the same request) also writes the Step 1 data.
+ */
 export function patchFields(patch: ApplicationPatch, nowIso: string): Record<string, unknown> {
+  const own = eventFields(patch, nowIso)
+  if (patch.step !== "paso1" && "step1" in patch && patch.step1) {
+    return { ...step1Fields(patch.step1.data, patch.step1.client), ...own }
+  }
+  return own
+}
+
+function eventFields(patch: ApplicationPatch, nowIso: string): Record<string, unknown> {
   switch (patch.step) {
     case "paso1":
       return {
@@ -238,12 +269,17 @@ export async function recordApplication(
   }
   // Short prefix to identify the request in logs (the authorization is an opaque random id).
   const ref = `${authorization.slice(0, 6)}…`
-  const budgetMs = opts.budgetMs ?? WRITE_BUDGET_MS
-  const airtable =
-    opts.airtable === undefined
-      ? airtableFromEnv({ timeoutMs: budgetMs, rateLimitRetries: 0, signal: AbortSignal.timeout(budgetMs) })
-      : opts.airtable
-  if (!airtable) {
+  const isStep1 = patch.step === "paso1"
+  const budgetMs = opts.budgetMs ?? (isStep1 ? STEP1_BUDGET_MS : WRITE_BUDGET_MS)
+  const startedAt = Date.now()
+  const remaining = () => budgetMs - (Date.now() - startedAt)
+  // One overall deadline for every request of this call; each request also gets its own cap.
+  const overall = AbortSignal.timeout(budgetMs)
+  const clientFor = (capMs: number): AirtableClient | null =>
+    opts.airtable !== undefined
+      ? opts.airtable
+      : airtableFromEnv({ timeoutMs: Math.max(1, Math.min(capMs, remaining())), rateLimitRetries: 0, signal: overall })
+  if (!clientFor(budgetMs)) {
     console.warn(`[applications] ${patch.step} ${ref}: storage not configured; not recorded`)
     return false
   }
@@ -254,38 +290,49 @@ export async function recordApplication(
     "updated-at": nowIso,
     ...(opts.test ? { test: true } : {}),
   }
-  const byAuthorization = () =>
+  const byAuthorization = (airtable: AirtableClient) =>
     airtable.list<{ attempts?: number }>(APPLICATIONS_TABLE, { filterByFormula: `{authorization} = ${formulaString(authorization)}` })
-  const updateNewest = async (records: AirtableRecord<{ attempts?: number }>[]) => {
+  const updateNewest = async (airtable: AirtableClient, records: AirtableRecord<{ attempts?: number }>[]) => {
     console.warn(`[applications] ${patch.step} ${ref}: ${records.length} records share this authorization; updating the newest`)
     await airtable.update(APPLICATIONS_TABLE, [{ id: newest(records).id, fields: compact(fields) }])
   }
 
-  try {
-    if (patch.step === "paso1") {
-      // Read attempts first (not atomic, which is enough: the Step 1 button is disabled while the
-      // call runs). If the read fails, write Step 1 anyway, without attempts.
-      let existing: AirtableRecord<{ attempts?: number }>[] | null = null
-      try {
-        existing = await byAuthorization()
-      } catch (error) {
-        console.error(`[applications] ${patch.step} ${ref}: attempts read failed (${describe(error)}); writing without attempts`)
-      }
-      if (existing) fields.attempts = ((existing.length > 0 ? newest(existing).fields.attempts : 0) ?? 0) + 1
-      if (existing && existing.length > 1) {
-        await updateNewest(existing)
-        return true
-      }
+  // Step 1: read attempts first (not atomic, which is enough: the Step 1 button is disabled while
+  // the call runs), capped so it never eats the whole budget. If it fails, write without attempts.
+  let existing: AirtableRecord<{ attempts?: number }>[] | null = null
+  if (isStep1) {
+    try {
+      existing = await byAuthorization(clientFor(ATTEMPTS_READ_MAX_MS)!)
+    } catch (error) {
+      console.error(`[applications] ${patch.step} ${ref}: attempts read failed (${describe(error)}); writing without attempts`)
     }
+    if (existing) fields.attempts = ((existing.length > 0 ? newest(existing).fields.attempts : 0) ?? 0) + 1
+  }
+
+  const write = async () => {
+    const airtable = clientFor(isStep1 ? WRITE_ATTEMPT_MAX_MS : budgetMs)!
+    if (existing && existing.length > 1) return updateNewest(airtable, existing)
     try {
       await airtable.upsert(APPLICATIONS_TABLE, [compact(fields)], ["authorization"])
     } catch (error) {
       if (!isMultipleMatches(error)) throw error
-      await updateNewest(await byAuthorization())
+      await updateNewest(airtable, await byAuthorization(airtable))
     }
-    return true
-  } catch (error) {
-    console.error(`[applications] ${patch.step} ${ref} write failed: ${describe(error)}`)
-    return false
   }
+
+  const maxAttempts = isStep1 ? 2 : 1
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await write()
+      return true
+    } catch (error) {
+      const again = attempt < maxAttempts && retryable(error) && !overall.aborted && remaining() > MIN_RETRY_MS
+      console.error(`[applications] ${patch.step} ${ref} write failed${again ? ", retrying" : ""}: ${describe(error)}`)
+      if (!again) return false
+    }
+  }
+  return false
 }
+
+/** Timeout, network error or 5xx: worth one retry within the budget. */
+const retryable = (error: unknown) => error instanceof AirtableError && (error.status === 0 || error.status >= 500)

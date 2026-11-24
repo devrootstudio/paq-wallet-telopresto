@@ -132,6 +132,38 @@ describe("server actions write one applications record per authorization", () =>
     expect(record()[0].fields["disbursement-code"]).toBeUndefined()
   })
 
+  it("if the Step 1 write fails (even after its retry), the next event of the request carries the Step 1 data", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const { submitStep1Form } = await import("@/app/actions")
+    m(soap.sendTokenTyc).mockResolvedValue({ returnCode: 0 })
+    // Airtable rejects every Step 1 call (attempts read and both write attempts), then recovers.
+    vi.stubGlobal("fetch", (async (url: string | URL | Request, init?: RequestInit) => {
+      const body = String(init?.body ?? "")
+      if ((init?.method ?? "GET") === "GET" || body.includes('"step":"paso1"')) {
+        return new Response(JSON.stringify({ error: { type: "SERVER_ERROR" } }), { status: 503 })
+      }
+      return fake.fetch(url, init)
+    }) as typeof fetch)
+    expect(await submitStep1Form(step1)).toEqual({ success: true })
+    expect(record()).toHaveLength(1)
+    expect(record()[0].fields).toMatchObject({
+      step: "otp-enviado",
+      name: "Cliente Ficticio Dos",
+      identification: "3000000000202",
+      "start-date": "2024-01-01",
+      salary: 4000,
+      company: "Empresa de la Lista",
+    })
+  })
+
+  it("when the Step 1 write succeeds, the next event does not resend its data", async () => {
+    const { submitStep1Form } = await import("@/app/actions")
+    m(soap.sendTokenTyc).mockResolvedValue({ returnCode: 0 })
+    await submitStep1Form(step1)
+    const otpWrite = fake.calls.filter((c) => c.method === "PATCH").map((c) => JSON.parse(c.body!).records[0].fields).find((f) => f.step === "otp-enviado")
+    expect(otpWrite.name).toBeUndefined()
+  })
+
   it("an Airtable outage does not change the action's response", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
     const { submitStep1Form } = await import("@/app/actions")

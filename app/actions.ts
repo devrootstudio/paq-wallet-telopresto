@@ -9,7 +9,7 @@ import {
   editClient,
   type QueryClientResponse,
 } from "@/lib/soap-client"
-import { recordApplication } from "@/lib/applications"
+import { recordApplication, type Step1Snapshot } from "@/lib/applications"
 import { validateSecurityToken } from "@/lib/security-token"
 import { createHash } from "crypto"
 import { generarPagare } from "@/lib/pagare"
@@ -378,6 +378,9 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
       }
     }
 
+    // Step 1 data to resend with the next event of this request if the Step 1 record write fails.
+    let step1Backup: Step1Snapshot | undefined
+
     // STEP 1: Create or Edit client based on nextAction (when specified)
     const nextAction = data.nextAction
     const salaryNumber =
@@ -489,7 +492,10 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
       }
 
       // Record Step 1 with the successful client create/edit
-      await recordApplication(data.autorizacion, { step: "paso1", data, client: mockClientResponse }, { test: ENABLE_TEST_BYPASS })
+      // If this write fails, the next event of this request carries the Step 1 data again.
+      step1Backup = (await recordApplication(data.autorizacion, { step: "paso1", data, client: mockClientResponse }, { test: ENABLE_TEST_BYPASS }))
+        ? undefined
+        : { data, client: mockClientResponse }
     } else {
       // Default / continue behaviour: do NOT call Registra_Cliente/Edita_Cliente, just pass the data through
       console.log("ℹ️ nextAction is not create/edit (undefined or \"continue\"), skipping client create/edit and passing data through")
@@ -511,7 +517,9 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
         },
       }
 
-      await recordApplication(data.autorizacion, { step: "paso1", data, client: mockClientResponse }, { test: ENABLE_TEST_BYPASS })
+      step1Backup = (await recordApplication(data.autorizacion, { step: "paso1", data, client: mockClientResponse }, { test: ENABLE_TEST_BYPASS }))
+        ? undefined
+        : { data, client: mockClientResponse }
     }
 
     // Send OTP token to client's phone for step 2 validation (common flow)
@@ -550,7 +558,7 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
         console.error(`   Message: ${errorMessage}`)
         await recordApplication(
           data.autorizacion,
-          { step: "error", errorStep: "otp", error: { message: baseMessage, code: tokenReturnCode } },
+          { step: "error", errorStep: "otp", error: { message: baseMessage, code: tokenReturnCode }, step1: step1Backup },
           { test: ENABLE_TEST_BYPASS },
         )
         return {
@@ -579,7 +587,7 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
           console.error("❌ Error validating cupo:", error)
           await recordApplication(
             data.autorizacion,
-            { step: "error", errorStep: "cupo", error: { message: error instanceof Error ? error.message : "Error validating credit limit" } },
+            { step: "error", errorStep: "cupo", error: { message: error instanceof Error ? error.message : "Error validating credit limit" }, step1: step1Backup },
             { test: ENABLE_TEST_BYPASS },
           )
           return {
@@ -602,7 +610,7 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
 
           await recordApplication(
             data.autorizacion,
-            { step: "error", errorStep: "cupo", error: { message: errorMessage, code: cupoReturnCode } },
+            { step: "error", errorStep: "cupo", error: { message: errorMessage, code: cupoReturnCode }, step1: step1Backup },
             { test: ENABLE_TEST_BYPASS },
           )
 
@@ -622,7 +630,7 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
 
         await recordApplication(
           data.autorizacion,
-          { step: "cupo-validado", approvedAmount: cupoResponse.cupoAutorizado, cupoId: cupoResponse.idSolicitud },
+          { step: "cupo-validado", approvedAmount: cupoResponse.cupoAutorizado, cupoId: cupoResponse.idSolicitud, step1: step1Backup },
           { test: ENABLE_TEST_BYPASS },
         )
 
@@ -640,12 +648,12 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
       // Code 0: OTP token sent successfully, proceed to step 2
       console.log("✅ OTP token sent successfully")
       console.log(`   Message: ${tokenResponse.message}`)
-      await recordApplication(data.autorizacion, { step: "otp-enviado" }, { test: ENABLE_TEST_BYPASS })
+      await recordApplication(data.autorizacion, { step: "otp-enviado", step1: step1Backup }, { test: ENABLE_TEST_BYPASS })
     } catch (error) {
       // OTP sending failed - go to fallback
       console.error("❌ Error sending OTP token:", error)
       const errorMessage = error instanceof Error ? error.message : "Error al enviar el SMS. Por favor intenta de nuevo."
-      await recordApplication(data.autorizacion, { step: "error", errorStep: "otp", error: { message: errorMessage } }, { test: ENABLE_TEST_BYPASS })
+      await recordApplication(data.autorizacion, { step: "error", errorStep: "otp", error: { message: errorMessage }, step1: step1Backup }, { test: ENABLE_TEST_BYPASS })
       return {
         success: false,
         error: errorMessage,
