@@ -90,6 +90,8 @@ export interface GuarantorFields {
   "guarantor-leads"?: string[]
   /** `<attempt>@<epoch ms>` while an answer is being processed (lib/avales/answer.ts). */
   "answer-claim"?: string
+  /** Simulation only: the guarantor link of a test request, for local testing from Airtable. */
+  "dev-link"?: string
 }
 
 export interface SubmitOutcome {

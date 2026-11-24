@@ -274,7 +274,13 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
         fail("invite", g.id, new Error(sent.reason))
         continue
       }
-      await airtable.update(TABLES.guarantors, [{ id: g.id, fields: { status: "invited" satisfies GuarantorStatus, "invited-at": nowIso() } }])
+      // Local testing only: in simulation, a test request's guarantor link is also stored in
+      // `dev-link` so it can be opened from Airtable (no WhatsApp yet). Never outside simulation
+      // or for real requests; a re-invitation overwrites it with the new link.
+      const devLink = deps.simulation && isTestRequest(request.fields) ? { "dev-link": url } : {}
+      await airtable.update(TABLES.guarantors, [
+        { id: g.id, fields: { status: "invited" satisfies GuarantorStatus, "invited-at": nowIso(), ...devLink } },
+      ])
       report.invited++
       report.links?.push({ requestId: request.id, position: g.fields.position ?? 0, url })
     } catch (error) {
