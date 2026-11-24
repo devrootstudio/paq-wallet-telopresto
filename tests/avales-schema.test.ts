@@ -229,14 +229,14 @@ describe('company "Otra" (typed by hand)', () => {
     const base = validRequest()
     return { ...base, applicant: { ...base.applicant, ...applicant } }
   }
-  const other = { companyOther: true, company: "Empresa Nueva", companyPhone: "2222 3333", companyAddress: "  6a avenida 1-23, zona 1, Guatemala  " }
+  const other = { companyOther: true, company: "Empresa Nueva", companyPhone: "1900 0002", companyAddress: "  6a avenida 1-23, zona 1, Guatemala  " }
 
   it("valid: name, phone (normalized) and address (trimmed) come out", () => {
     const out = guarantorRequestSchema.parse(withCompany(other))
     expect(out.applicant).toMatchObject({
       companyOther: true,
       company: "Empresa Nueva",
-      companyPhone: "22223333",
+      companyPhone: "19000002",
       companyAddress: "6a avenida 1-23, zona 1, Guatemala",
     })
   })

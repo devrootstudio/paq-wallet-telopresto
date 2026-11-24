@@ -115,13 +115,13 @@ describe("submit", () => {
     await repo.submit(
       guarantorRequestSchema.parse({
         ...base,
-        applicant: { ...base.applicant, companyOther: true, company: "Empresa Nueva", companyPhone: "2222 3333", companyAddress: "6a avenida 1-23, zona 1" },
+        applicant: { ...base.applicant, companyOther: true, company: "Empresa Nueva", companyPhone: "1900 0002", companyAddress: "6a avenida 1-23, zona 1" },
       }),
     )
     expect(fake.rows("requests")[0].fields).toMatchObject({
       company: "Empresa Nueva",
       "company-other": true,
-      "company-phone": "22223333",
+      "company-phone": "19000002",
       "company-address": "6a avenida 1-23, zona 1",
     })
 
