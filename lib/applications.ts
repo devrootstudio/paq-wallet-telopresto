@@ -76,11 +76,20 @@ export type ApplicationPatch =
   /** Disbursement done. */
   | { step: "desembolsado"; requestedAmount?: number; commission?: number; code: string | number; message?: string }
   /**
-   * A step failed: only step, last-error-step and last-error are written, so an error never
-   * overwrites data of an earlier success (e.g. the disbursement code). `otpValidated` when the
+   * A step failed: step, last-error-step and last-error (plus the attempted amount and commission
+   * of a failed disbursement). Never the disbursement code or message, so an error never overwrites
+   * the evidence of an earlier success. `otpValidated` when the
    * OTP had been validated before the failure (Step 2). `step1`: as above.
    */
-  | { step: "error"; errorStep: ApplicationErrorStep; error: StepError; otpValidated?: boolean; step1?: Step1Snapshot }
+  | {
+      step: "error"
+      errorStep: ApplicationErrorStep
+      error: StepError
+      otpValidated?: boolean
+      step1?: Step1Snapshot
+      /** For a failed disbursement: the amount and commission attempted. */
+      disbursement?: { requestedAmount?: number; commission?: number }
+    }
 
 /** Step 1 data and client response, resent with a later event when the Step 1 write failed. */
 export interface Step1Snapshot {
@@ -242,6 +251,11 @@ function eventFields(patch: ApplicationPatch, nowIso: string): Record<string, un
         "last-error-step": patch.errorStep,
         "last-error": errorText(patch.error),
         ...(patch.otpValidated ? { "otp-validated-at": nowIso } : {}),
+        // The amount and commission of a failed disbursement never contradict an earlier success;
+        // the disbursement code and message (a success's evidence) are never written by an error.
+        ...(patch.errorStep === "desembolso" && patch.disbursement
+          ? { "requested-amount": amount(patch.disbursement.requestedAmount), commission: amount(patch.disbursement.commission) }
+          : {}),
       }
   }
 }
@@ -330,22 +344,30 @@ export async function recordApplication(
     try {
       return await airtable.upsert(APPLICATIONS_TABLE, [compact(fields)], ["authorization"])
     } catch (error) {
-      if (!isMultipleMatches(error)) throw error
-      await updateNewest(airtable, await byAuthorization(airtable))
+      // Several records sharing the authorization make the upsert fail with a 422. The exact error
+      // type of the live API is not confirmed, so outside Step 1 any 422 checks for duplicates.
+      const duplicatesSuspected = isStep1 ? isMultipleMatches(error) : error instanceof AirtableError && error.status === 422
+      if (!duplicatesSuspected) throw error
+      const records = await byAuthorization(airtable)
+      if (records.length < 2) throw error // not a duplicates problem: report the original failure
+      await updateNewest(airtable, records)
       return null
     }
   }
 
+  /** A later event carrying the Step 1 backup (its Step 1 write failed in this request). */
+  const carriesStep1 = !isStep1 && "step1" in patch && Boolean(patch.step1)
+
   /**
-   * Step 1 written without attempts (the read failed twice): a record the upsert just created is
-   * the first attempt, so it gets attempts = 1. An existing record is left without a count (never a
-   * made-up number) and logged.
+   * Step 1 written without attempts (the read failed twice), or an event carrying the Step 1
+   * backup: a record the upsert just created is the first attempt, so it gets attempts = 1. An
+   * existing record is never given a made-up number (Step 1 logs that case).
    */
   const fixAttempts = async (outcome: UpsertResult | null) => {
-    if (!isStep1 || fields.attempts !== undefined || !outcome) return
+    if (!outcome || !((isStep1 && fields.attempts === undefined) || carriesStep1)) return
     const created = outcome.records.find((r) => outcome.createdRecords.includes(r.id))
     if (!created) {
-      console.warn(`[applications] ${patch.step} ${ref}: attempts unknown for an existing record; left without a count`)
+      if (isStep1) console.warn(`[applications] ${patch.step} ${ref}: attempts unknown for an existing record; left without a count`)
       return
     }
     try {

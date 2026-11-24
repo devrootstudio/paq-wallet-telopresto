@@ -414,7 +414,7 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
       await airtable.update(TABLES.requests, [
         { id, fields: { status: "release_failed" satisfies RequestStatus, "release-message": message, ...(returnCode ? { "release-code": returnCode } : {}) } },
       ])
-      await noteApplication({ step: "error", errorStep, error: { message, code: returnCode } })
+      await noteApplication({ step: "error", errorStep, error: { message, code: returnCode }, ...(errorStep === "desembolso" ? { disbursement: amounts } : {}) })
       return { requestId: id, status: "release_failed" as const, ...(returnCode ? { returnCode } : {}) }
     }
 

@@ -1140,6 +1140,7 @@ export async function submitStep3Form(data: Step3FormData): Promise<ServerAction
         {
           step: "error",
           errorStep: "desembolso",
+          disbursement: { requestedAmount: data.monto, commission: data.comision },
           error: { message: release.error, code: release.returnCode },
         },
         { test: ENABLE_TEST_BYPASS },
@@ -1179,6 +1180,7 @@ export async function submitStep3Form(data: Step3FormData): Promise<ServerAction
       {
         step: "error",
         errorStep: "desembolso",
+        disbursement: { requestedAmount: data.monto, commission: data.comision },
         error: { message: error instanceof Error ? error.message : "Unknown error processing disbursement" },
       },
       { test: ENABLE_TEST_BYPASS },

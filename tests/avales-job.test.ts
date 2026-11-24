@@ -417,7 +417,7 @@ describe("steps 2–5: quorum and release", () => {
       await w.run()
       expect(w.applications).toHaveBeenCalledWith(
         "SIM-job-0001",
-        { step: "error", errorStep: "desembolso", error: { message: "Rejected", code: "12" } },
+        { step: "error", errorStep: "desembolso", error: { message: "Rejected", code: "12" }, disbursement: { requestedAmount: 1000, commission: 75 } },
         { test: true },
       )
     })

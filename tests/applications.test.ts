@@ -188,6 +188,26 @@ describe("recordApplication: what each step writes", () => {
     })
   })
 
+  it("a failed disbursement writes the attempted amount and commission, never the disbursement code or message", async () => {
+    await recordApplication(AUTH, { step: "desembolsado", requestedAmount: 1000, commission: 84, code: "0", message: "Disbursed" }, deps())
+    await recordApplication(
+      AUTH,
+      { step: "error", errorStep: "desembolso", error: { message: "Rechazado", code: "12" }, disbursement: { requestedAmount: 1200, commission: 90 } },
+      deps(),
+    )
+    const errorWrite = JSON.parse(upserts()[1].body!).records[0].fields
+    expect(Object.keys(errorWrite).sort()).toEqual(["authorization", "commission", "last-error", "last-error-step", "requested-amount", "step", "updated-at"])
+    expect(rows()[0].fields).toMatchObject({
+      "requested-amount": 1200,
+      commission: 90,
+      "disbursement-code": "0",
+      "disbursement-message": "Disbursed",
+    })
+    // Only desembolso errors carry amounts.
+    await recordApplication(AUTH, { step: "error", errorStep: "cupo", error: { message: "x" }, disbursement: { requestedAmount: 1 } }, deps())
+    expect(JSON.parse(upserts()[2].body!).records[0].fields["requested-amount"]).toBeUndefined()
+  })
+
   it("returns true when written", async () => {
     expect(await recordApplication(AUTH, { step: "otp-enviado" }, deps())).toBe(true)
   })
@@ -244,6 +264,30 @@ describe("old duplicates sharing the authorization", () => {
     expect(warns.join("\n")).not.toContain(AUTH)
   })
 
+  it("outside Step 1, any 422 from the upsert checks for duplicates (the live error type is not confirmed)", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const { newer } = seedDuplicates()
+    // A 422 with some other type, while two records share the authorization.
+    fake.failOn("PATCH", APPLICATIONS_TABLE, 422)
+    expect(await recordApplication(AUTH, { step: "otp-enviado" }, deps())).toBe(true)
+    expect(newer.fields.step).toBe("otp-enviado")
+  })
+
+  it("a 422 with one record (or none) is not a duplicates problem: the write fails, logged", async () => {
+    const errors: string[] = []
+    vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void errors.push(a.join(" ")))
+    fake.seed(APPLICATIONS_TABLE, { authorization: AUTH, attempts: 1 })
+    fake.failOn("PATCH", APPLICATIONS_TABLE, 422)
+    expect(await recordApplication(AUTH, { step: "otp-enviado" }, deps())).toBe(false)
+    expect(rows()[0].fields.step).toBeUndefined()
+    expect(errors.join("\n")).toContain(`[applications] otp-enviado ${AUTH.slice(0, 6)}… write failed: 422`)
+
+    fake.rows(APPLICATIONS_TABLE).splice(0)
+    fake.failOn("PATCH", APPLICATIONS_TABLE, 422)
+    expect(await recordApplication(AUTH, { step: "otp-enviado" }, deps())).toBe(false)
+    expect(rows()).toHaveLength(0)
+  })
+
   it("Step 1 counts attempts from the newest record and updates it", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {})
     const { newer } = seedDuplicates()
@@ -298,6 +342,21 @@ describe("recordApplication never throws, never retries, and reports failure", (
     expect(rows()[0].fields).toMatchObject({ step: "cupo-validado", "approved-amount": 900, name: "Cliente Ficticio Prueba" })
     await recordApplication(AUTH, { step: "error", errorStep: "otp", error: { message: "x" }, step1: { data: step1, client } }, deps())
     expect(rows()[0].fields).toMatchObject({ step: "error", name: "Cliente Ficticio Prueba" })
+  })
+
+  it("an event carrying step1 that creates the record also sets attempts = 1; one that updates leaves the count alone", async () => {
+    await recordApplication(AUTH, { step: "otp-enviado", step1: { data: step1, client } }, deps())
+    expect(rows()[0].fields).toMatchObject({ step: "otp-enviado", attempts: 1 })
+
+    const other = "b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4"
+    fake.seed(APPLICATIONS_TABLE, { authorization: other, attempts: 3 })
+    await recordApplication(other, { step: "otp-enviado", step1: { data: step1, client } }, deps())
+    expect(rows().find((r) => r.fields.authorization === other)!.fields.attempts).toBe(3)
+
+    // Without the backup, a created record gets no attempts (only Step 1 counts them).
+    const third = "c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4"
+    await recordApplication(third, { step: "otp-enviado" }, deps())
+    expect(rows().find((r) => r.fields.authorization === third)!.fields.attempts).toBeUndefined()
   })
 
   it("if reading attempts fails, Step 1 is still written; a record the upsert created gets attempts = 1", async () => {
