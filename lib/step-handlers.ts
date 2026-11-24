@@ -117,6 +117,9 @@ export async function handleStep1Submit(
     edad: string
     estadoCivil: string
     domicilio: string
+    empresaOtra?: boolean
+    empresaTelefono?: string
+    empresaDireccion?: string
   },
   store: Pick<WizardState, "nextStepAsync" | "setLoading" | "setErrorStep" | "updateFormData" | "goToStepAsync" | "formData">,
 ) {
@@ -134,7 +137,11 @@ export async function handleStep1Submit(
       startDate: formData.startDate,
       salary: formData.salary,
       paymentFrequency: formData.paymentFrequency,
-      empresa: formData.empresa,
+      empresa: formData.empresa.trim(),
+      // "Otra" company typed by hand: phone and address only travel when it is picked.
+      empresaOtra: formData.empresaOtra ?? false,
+      empresaTelefono: formData.empresaOtra ? (formData.empresaTelefono ?? "").replace(/\s/g, "") : "",
+      empresaDireccion: formData.empresaOtra ? (formData.empresaDireccion ?? "").trim() : "",
       edad: formData.edad,
       estadoCivil: formData.estadoCivil,
       domicilio: formData.domicilio,

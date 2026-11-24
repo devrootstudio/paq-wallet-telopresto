@@ -34,10 +34,19 @@ export interface ApplicantInput {
   identification: string
   fullName: string
   email: string
+  /** Company name: the one picked from the list, or the one typed when `companyOther` is true. */
   company: string
   age: string
   maritalStatus: string
   address: string
+  /**
+   * true when the applicant picked "Otra" and typed the company. Then `company` (1–200),
+   * `companyPhone` (8 digits) and `companyAddress` (10–300 characters) are required.
+   * When false or absent, `companyPhone` and `companyAddress` are ignored.
+   */
+  companyOther?: boolean
+  companyPhone?: string
+  companyAddress?: string
 }
 
 /** Device and OTP evidence collected client-side (same data the pagaré uses today). */

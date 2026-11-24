@@ -21,7 +21,10 @@ interface FormData {
   autorizacion: string // Authorization number generated at step 0 for end-to-end tracking
   clientId: string // Client ID from system - used to determine if we should edit or create profile
   nextAction: "create" | "edit" | "continue" // Indicates the next action for step 1
-  empresa: string
+  empresa: string // Company name: picked from the list, or typed when empresaOtra is true
+  empresaOtra: boolean // "Otra": the company is not in the list
+  empresaTelefono: string // Only with empresaOtra: company phone (8 digits)
+  empresaDireccion: string // Only with empresaOtra: company address
   edad: string
   estadoCivil: string
   domicilio: string
@@ -117,6 +120,9 @@ export const useWizardStore = create<WizardState>((set) => ({
     clientId: "", // Client ID from system - used to determine if we should edit or create profile
     nextAction: "continue", // Default behavior: just continue normal flow
     empresa: "",
+    empresaOtra: false,
+    empresaTelefono: "",
+    empresaDireccion: "",
     edad: "",
     estadoCivil: "",
     domicilio: "",
@@ -163,6 +169,9 @@ export const useWizardStore = create<WizardState>((set) => ({
             clientId: "",
             nextAction: "continue",
             empresa: "",
+            empresaOtra: false,
+            empresaTelefono: "",
+            empresaDireccion: "",
             edad: "",
             estadoCivil: "",
             domicilio: "",
@@ -286,6 +295,9 @@ export const useWizardStore = create<WizardState>((set) => ({
         clientId: "",
         nextAction: "continue",
         empresa: "",
+        empresaOtra: false,
+        empresaTelefono: "",
+        empresaDireccion: "",
         edad: "",
         estadoCivil: "",
         domicilio: "",

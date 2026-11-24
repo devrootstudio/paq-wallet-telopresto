@@ -14,6 +14,10 @@ interface FormDataPayload {
   startDate: string
   salary: string
   paymentFrequency: string
+  empresa?: string
+  empresaOtra?: boolean
+  empresaTelefono?: string
+  empresaDireccion?: string
 }
 
 interface WebhookPayload {
@@ -91,6 +95,11 @@ export async function sendToMakeWebhook(
         startDate: normalizeStartDate(formData.startDate),
         salary: formData.salary,
         paymentFrequency: normalizePaymentFrequency(formData.paymentFrequency),
+        // Company: the name (picked or typed) and, for "Otra", its phone and address.
+        empresa: formData.empresa ?? "",
+        empresaOtra: formData.empresaOtra ?? false,
+        empresaTelefono: formData.empresaOtra ? (formData.empresaTelefono ?? "") : "",
+        empresaDireccion: formData.empresaOtra ? (formData.empresaDireccion ?? "") : "",
       },
       soapResponse: soapResponse
         ? {

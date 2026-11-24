@@ -115,16 +115,46 @@ export function makeGuarantorsSchema(applicant: { phone: string; identification:
 
 const optionalText = (max: number) => z.string().trim().max(max).optional().default("")
 
-export const applicantSchema = z.object({
-  phone: phoneSchema,
-  identification: dpiSchema,
-  fullName: fullNameSchema,
-  email: z.string().trim().max(200).default(""),
-  company: optionalText(200),
-  age: optionalText(10),
-  maritalStatus: optionalText(50),
-  address: optionalText(300),
-})
+const OTHER_COMPANY = {
+  name: "Escribe el nombre de la empresa",
+  phone: "El teléfono de la empresa debe tener 8 dígitos",
+  address: "Ingresa la dirección completa de la empresa",
+} as const
+
+/**
+ * Applicant data. With `companyOther` ("Otra" company typed by hand) the company name, phone and
+ * address are required; otherwise phone and address are ignored and come out empty.
+ */
+export const applicantSchema = z
+  .object({
+    phone: phoneSchema,
+    identification: dpiSchema,
+    fullName: fullNameSchema,
+    email: z.string().trim().max(200).default(""),
+    company: z.string().trim().max(200, "El nombre de la empresa es demasiado largo").optional().default(""),
+    age: optionalText(10),
+    maritalStatus: optionalText(50),
+    address: optionalText(300),
+    companyOther: z.boolean().optional().default(false),
+    companyPhone: z.string().optional(),
+    companyAddress: z.string().optional(),
+  })
+  .superRefine((a, ctx) => {
+    if (!a.companyOther) return
+    if (a.company.length < 1) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["company"], message: OTHER_COMPANY.name })
+    if (!phoneSchema.safeParse(a.companyPhone ?? "").success) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["companyPhone"], message: OTHER_COMPANY.phone })
+    }
+    const address = (a.companyAddress ?? "").trim()
+    if (address.length < 10 || address.length > 300) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["companyAddress"], message: OTHER_COMPANY.address })
+    }
+  })
+  .transform((a) => ({
+    ...a,
+    companyPhone: a.companyOther ? stripSeparators(a.companyPhone ?? "") : "",
+    companyAddress: a.companyOther ? (a.companyAddress ?? "").trim() : "",
+  }))
 
 const auditSchema = z.object({
   fingerprint: optionalText(200),

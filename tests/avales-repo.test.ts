@@ -109,6 +109,29 @@ describe("submit", () => {
     expect(new Set(guarantors.map((g) => g.fields["token-hash"])).size).toBe(3)
   })
 
+  it('stores the "Otra" company name, phone and address; nothing extra for a listed company', async () => {
+    const { fake, repo } = setup()
+    const base = input()
+    await repo.submit(
+      guarantorRequestSchema.parse({
+        ...base,
+        applicant: { ...base.applicant, companyOther: true, company: "Empresa Nueva", companyPhone: "1900 0002", companyAddress: "6a avenida 1-23, zona 1" },
+      }),
+    )
+    expect(fake.rows("requests")[0].fields).toMatchObject({
+      company: "Empresa Nueva",
+      "company-other": true,
+      "company-phone": "19000002",
+      "company-address": "6a avenida 1-23, zona 1",
+    })
+
+    const listed = setup()
+    await listed.repo.submit(parsed())
+    const f = listed.fake.rows("requests")[0].fields
+    expect(f.company).toBe("Empresa Ficticia")
+    expect([f["company-other"], f["company-phone"], f["company-address"]]).toEqual([undefined, undefined, undefined])
+  })
+
   it("double submit: the second call returns the same request and creates nothing", async () => {
     const { fake, repo } = setup()
     const first = await repo.submit(parsed())

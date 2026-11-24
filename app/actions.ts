@@ -62,6 +62,9 @@ interface Step1FormData {
   salary: string
   paymentFrequency: string
   empresa?: string
+  empresaOtra?: boolean // "Otra": company typed by hand (empresa holds its name)
+  empresaTelefono?: string // Only with empresaOtra
+  empresaDireccion?: string // Only with empresaOtra
   edad?: string
   estadoCivil?: string
   domicilio?: string

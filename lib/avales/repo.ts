@@ -54,6 +54,10 @@ export interface RequestFields {
   "full-name"?: string
   email?: string
   company?: string
+  /** The applicant picked "Otra" and typed the company; then company-phone and company-address are set. */
+  "company-other"?: boolean
+  "company-phone"?: string
+  "company-address"?: string
   age?: string
   "marital-status"?: string
   address?: string
@@ -126,6 +130,8 @@ function requestFields(input: ParsedGuarantorRequest, expiresAt: string, test: b
     "full-name": a.fullName,
     email: a.email,
     company: a.company,
+    // "Otra" company typed by hand: also its phone and address (only then).
+    ...(a.companyOther ? { "company-other": true, "company-phone": a.companyPhone, "company-address": a.companyAddress } : {}),
     age: a.age,
     "marital-status": a.maritalStatus,
     address: a.address,
