@@ -300,12 +300,18 @@ describe("recordApplication never throws, never retries, and reports failure", (
     expect(rows()[0].fields).toMatchObject({ step: "error", name: "Cliente Ficticio Prueba" })
   })
 
-  it("if reading attempts fails, Step 1 is still written (without attempts)", async () => {
+  it("if reading attempts fails, Step 1 is still written; a record the upsert created gets attempts = 1", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
     fake.failOn("GET", APPLICATIONS_TABLE, 503)
     expect(await recordApplication(AUTH, { step: "paso1", data: step1, client }, deps())).toBe(true)
-    expect(rows()[0].fields).toMatchObject({ step: "paso1", name: "Cliente Ficticio Prueba" })
-    expect(rows()[0].fields.attempts).toBeUndefined()
+    expect(rows()[0].fields).toMatchObject({ step: "paso1", name: "Cliente Ficticio Prueba", attempts: 1 })
+  })
+
+  it("a 5xx on the attempts read is not retried (only a timeout or network error is)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    fake.failOn("GET", APPLICATIONS_TABLE, 503)
+    await recordApplication(AUTH, { step: "paso1", data: step1, client }, deps())
+    expect(fake.calls.filter((c) => c.method === "GET")).toHaveLength(1)
   })
 
   it("the default client is time-boxed: a hanging Airtable ends in about the budget, with false", async () => {
@@ -366,17 +372,48 @@ describe("recordApplication never throws, never retries, and reports failure", (
       })
     })
 
-    it("Step 1: a hanging attempts read is cut at ~3 s and the write still gets in within the 8 s budget", async () => {
+    it("Step 1: a hanging attempts read is cut at ~3 s, retried once (~2 s), and the write still gets in within 8 s", async () => {
       await withEnv(coldFetch((m) => (m === "GET" ? "hang" : "ok")), async () => {
         const started = Date.now()
         expect(await recordApplication(AUTH, { step: "paso1", data: step1, client })).toBe(true)
         const elapsed = Date.now() - started
-        expect(elapsed).toBeGreaterThanOrEqual(2900)
+        expect(elapsed).toBeGreaterThanOrEqual(4900)
         expect(elapsed).toBeLessThan(8000)
-        expect(rows()[0].fields).toMatchObject({ step: "paso1", name: "Cliente Ficticio Prueba" })
-        expect(rows()[0].fields.attempts).toBeUndefined()
+        // Both reads failed and the upsert created the record: it is the first attempt.
+        expect(rows()[0].fields).toMatchObject({ step: "paso1", name: "Cliente Ficticio Prueba", attempts: 1 })
       })
     }, 12_000)
+
+    it("Step 1: the attempts read times out once and answers on its retry → attempts counted correctly", async () => {
+      fake.seed(APPLICATIONS_TABLE, { authorization: AUTH, attempts: 1, step: "error" })
+      let reads = 0
+      await withEnv(coldFetch((m) => (m === "GET" && ++reads === 1 ? "timeout" : "ok")), async () => {
+        expect(await recordApplication(AUTH, { step: "paso1", data: step1, client })).toBe(true)
+        expect(reads).toBe(2)
+        expect(rows()).toHaveLength(1)
+        expect(rows()[0].fields).toMatchObject({ step: "paso1", attempts: 2 })
+      })
+    })
+
+    it("Step 1: both reads fail and the upsert creates the record → attempts = 1", async () => {
+      await withEnv(coldFetch((m) => (m === "GET" ? "timeout" : "ok")), async () => {
+        expect(await recordApplication(AUTH, { step: "paso1", data: step1, client })).toBe(true)
+        expect(rows()[0].fields.attempts).toBe(1)
+      })
+    })
+
+    it("Step 1: both reads fail and the upsert updates an existing record → no made-up count, logged", async () => {
+      fake.seed(APPLICATIONS_TABLE, { authorization: AUTH, attempts: 1, step: "error" })
+      const warns: string[] = []
+      await withEnv(coldFetch((m) => (m === "GET" ? "timeout" : "ok")), async () => {
+        vi.spyOn(console, "warn").mockImplementation((...a: unknown[]) => void warns.push(a.join(" ")))
+        expect(await recordApplication(AUTH, { step: "paso1", data: step1, client })).toBe(true)
+        expect(rows()).toHaveLength(1)
+        expect(rows()[0].fields).toMatchObject({ step: "paso1", attempts: 1 }) // unchanged, not invented
+        expect(warns.join("\n")).toContain(`[applications] paso1 ${AUTH.slice(0, 6)}…: attempts unknown for an existing record`)
+        expect(warns.join("\n")).not.toContain(AUTH)
+      })
+    })
 
     it("later steps keep the 3 s budget and no retry", async () => {
       await withEnv(coldFetch(() => "timeout"), async () => {

@@ -1,4 +1,4 @@
-import { AirtableError, airtableFromEnv, formulaString, type AirtableClient, type AirtableRecord, type Fields } from "@/lib/airtable"
+import { AirtableError, airtableFromEnv, formulaString, type AirtableClient, type AirtableRecord, type Fields, type UpsertResult } from "@/lib/airtable"
 import type { QueryClientResponse } from "@/lib/soap-client"
 
 /**
@@ -31,6 +31,8 @@ export const WRITE_BUDGET_MS = 3000
 export const STEP1_BUDGET_MS = 8000
 /** The Step 1 attempts read may not eat the whole budget. */
 export const ATTEMPTS_READ_MAX_MS = 3000
+/** The one retry of the attempts read (after a timeout or network error), on a warm connection. */
+export const ATTEMPTS_READ_RETRY_MAX_MS = 2000
 /** Each Step 1 write attempt, so a slow first one leaves time for the retry. */
 export const WRITE_ATTEMPT_MAX_MS = 4000
 /** A retry is only started with at least this much budget left. */
@@ -298,32 +300,65 @@ export async function recordApplication(
   }
 
   // Step 1: read attempts first (not atomic, which is enough: the Step 1 button is disabled while
-  // the call runs), capped so it never eats the whole budget. If it fails, write without attempts.
+  // the call runs), capped so it never eats the whole budget. A timeout or network error on a cold
+  // server is retried once (the connection is warm by then, so with a shorter cap). If both fail,
+  // write without attempts (see the created-record fix below).
   let existing: AirtableRecord<{ attempts?: number }>[] | null = null
   if (isStep1) {
-    try {
-      existing = await byAuthorization(clientFor(ATTEMPTS_READ_MAX_MS)!)
-    } catch (error) {
-      console.error(`[applications] ${patch.step} ${ref}: attempts read failed (${describe(error)}); writing without attempts`)
+    for (const [i, capMs] of [ATTEMPTS_READ_MAX_MS, ATTEMPTS_READ_RETRY_MAX_MS].entries()) {
+      try {
+        existing = await byAuthorization(clientFor(capMs)!)
+        break
+      } catch (error) {
+        const again = i === 0 && transient(error) && !overall.aborted && remaining() > MIN_RETRY_MS
+        console.error(
+          `[applications] ${patch.step} ${ref}: attempts read failed (${describe(error)}); ${again ? "retrying the read" : "writing without attempts"}`,
+        )
+        if (!again) break
+      }
     }
     if (existing) fields.attempts = ((existing.length > 0 ? newest(existing).fields.attempts : 0) ?? 0) + 1
   }
 
-  const write = async () => {
+  /** Writes the record; returns the upsert outcome when there was one. */
+  const write = async (): Promise<UpsertResult | null> => {
     const airtable = clientFor(isStep1 ? WRITE_ATTEMPT_MAX_MS : budgetMs)!
-    if (existing && existing.length > 1) return updateNewest(airtable, existing)
+    if (existing && existing.length > 1) {
+      await updateNewest(airtable, existing)
+      return null
+    }
     try {
-      await airtable.upsert(APPLICATIONS_TABLE, [compact(fields)], ["authorization"])
+      return await airtable.upsert(APPLICATIONS_TABLE, [compact(fields)], ["authorization"])
     } catch (error) {
       if (!isMultipleMatches(error)) throw error
       await updateNewest(airtable, await byAuthorization(airtable))
+      return null
+    }
+  }
+
+  /**
+   * Step 1 written without attempts (the read failed twice): a record the upsert just created is
+   * the first attempt, so it gets attempts = 1. An existing record is left without a count (never a
+   * made-up number) and logged.
+   */
+  const fixAttempts = async (outcome: UpsertResult | null) => {
+    if (!isStep1 || fields.attempts !== undefined || !outcome) return
+    const created = outcome.records.find((r) => outcome.createdRecords.includes(r.id))
+    if (!created) {
+      console.warn(`[applications] ${patch.step} ${ref}: attempts unknown for an existing record; left without a count`)
+      return
+    }
+    try {
+      await clientFor(budgetMs)!.update(APPLICATIONS_TABLE, [{ id: created.id, fields: { attempts: 1 } }])
+    } catch (error) {
+      console.error(`[applications] ${patch.step} ${ref}: attempts = 1 not written (${describe(error)})`)
     }
   }
 
   const maxAttempts = isStep1 ? 2 : 1
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      await write()
+      await fixAttempts(await write())
       return true
     } catch (error) {
       const again = attempt < maxAttempts && retryable(error) && !overall.aborted && remaining() > MIN_RETRY_MS
@@ -336,3 +371,6 @@ export async function recordApplication(
 
 /** Timeout, network error or 5xx: worth one retry within the budget. */
 const retryable = (error: unknown) => error instanceof AirtableError && (error.status === 0 || error.status >= 500)
+
+/** Timeout or network error (no HTTP answer): worth retrying the attempts read once. */
+const transient = (error: unknown) => error instanceof AirtableError && error.status === 0
