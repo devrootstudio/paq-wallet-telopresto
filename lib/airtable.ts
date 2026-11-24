@@ -70,6 +70,8 @@ export interface AirtableClientOptions {
   /** Retries after a 429, waiting 1 s, 2 s… Default 2. */
   rateLimitRetries?: number
   sleep?: (ms: number) => Promise<void>
+  /** Aborts every request of this client (e.g. an overall time budget), on top of the per-request timeout. */
+  signal?: AbortSignal
 }
 
 /** Quotes a value for use inside an Airtable formula string literal. */
@@ -126,7 +128,7 @@ export function createAirtableClient(options: AirtableClientOptions): AirtableCl
             ...(body === undefined ? {} : { "Content-Type": "application/json" }),
           },
           body: body === undefined ? undefined : JSON.stringify(body),
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: options.signal ? AbortSignal.any([AbortSignal.timeout(timeoutMs), options.signal]) : AbortSignal.timeout(timeoutMs),
           cache: "no-store",
         })
       } catch (error) {
@@ -206,9 +208,9 @@ export function createAirtableClient(options: AirtableClientOptions): AirtableCl
 }
 
 /** Client from `AIRTABLE_TOKEN` and `AIRTABLE_BASE_ID`, or null when either is missing. */
-export function airtableFromEnv(): AirtableClient | null {
+export function airtableFromEnv(options: Omit<AirtableClientOptions, "token" | "baseId"> = {}): AirtableClient | null {
   const token = process.env.AIRTABLE_TOKEN
   const baseId = process.env.AIRTABLE_BASE_ID
   if (!token || !baseId) return null
-  return createAirtableClient({ token, baseId })
+  return createAirtableClient({ ...options, token, baseId })
 }

@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto"
 import { AIRTABLE_TIMEOUT_MS, isRecordId, type AirtableClient, type AirtableRecord } from "@/lib/airtable"
+import { recordApplication, type ApplicationPatch } from "@/lib/applications"
 import { generarPagare, type PagareInput } from "@/lib/pagare"
 import { isDisbursed, releaseRequest, type ReleaseResult, type ReleaseStore } from "@/lib/release"
 import { validateCupo } from "@/lib/soap-client"
@@ -79,6 +80,8 @@ export interface JobDeps {
   clock?: () => number
   /** No new release starts after this many ms of the release step. Default RELEASE_BUDGET_MS. */
   releaseBudgetMs?: number
+  /** Records release outcomes in the applications table (one record per authorization). Default recordApplication. */
+  applications?: typeof recordApplication
 }
 
 /**
@@ -208,6 +211,7 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
   const recordAttempts = deps.recordAttempts ?? 4
   const clock = deps.clock ?? Date.now
   const budget = deps.releaseBudgetMs ?? RELEASE_BUDGET_MS
+  const applications = deps.applications ?? recordApplication
   const cupo = deps.cupo ?? defaultCupo(deps.simulation)
   const disburse = deps.disburse ?? defaultDisburse(deps.simulation, airtable)
   const repo = createAvalesRepo({ airtable, now, newToken: deps.newToken })
@@ -393,10 +397,24 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
     }
     if (!(await ownsClaim())) return skipped
 
-    const markFailed = async (message: string, returnCode?: string) => {
+    // The release outcome also goes to the applications record of this authorization (same test
+    // mark as the request). Best effort: it never affects the run, the claim or the release.
+    const r = current.fields
+    const amounts = { requestedAmount: r["requested-amount"], commission: r.commission }
+    const noteApplication = async (patch: ApplicationPatch) => {
+      try {
+        const written = await applications(r.authorization, patch, { test: isTestRequest(r) })
+        if (!written) fail("application", id, new Error(`${patch.step} not recorded in applications`))
+      } catch (error) {
+        fail("application", id, error)
+      }
+    }
+
+    const markFailed = async (message: string, returnCode?: string, errorStep: "cupo" | "desembolso" = "desembolso") => {
       await airtable.update(TABLES.requests, [
         { id, fields: { status: "release_failed" satisfies RequestStatus, "release-message": message, ...(returnCode ? { "release-code": returnCode } : {}) } },
       ])
+      await noteApplication({ step: "error", errorStep, error: { message, code: returnCode }, ...(errorStep === "desembolso" ? { disbursement: amounts } : {}) })
       return { requestId: id, status: "release_failed" as const, ...(returnCode ? { returnCode } : {}) }
     }
 
@@ -405,11 +423,12 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
     try {
       check = await cupo(claimed)
     } catch (error) {
-      return await markFailed(`valida_cupo: ${describe(error)}`)
+      return await markFailed(`valida_cupo: ${describe(error)}`, undefined, "cupo")
     }
-    if (!check.ok) return await markFailed(`valida_cupo: ${check.message}`)
+    if (!check.ok) return await markFailed(`valida_cupo: ${check.message}`, undefined, "cupo")
     if (check.cupoAutorizado < (claimed.fields["requested-amount"] ?? 0)) {
       await airtable.update(TABLES.requests, [{ id, fields: { status: "not_approved" satisfies RequestStatus, "release-message": "Cupo below the requested amount" } }])
+      await noteApplication({ step: "error", errorStep: "cupo", error: { message: "Cupo below the requested amount" } })
       await notifyApplicant(claimed, "request_not_approved")
       return { requestId: id, status: "not_approved" }
     }
@@ -423,7 +442,10 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
     }
     if (!outcome.success) return await markFailed(outcome.message, outcome.returnCode)
 
+    // The request record first (it is what guards against a second release), then applications;
+    // money moved, so applications records it whether or not the request write succeeded.
     const recorded = await recordRelease(id, outcome)
+    await noteApplication({ step: "desembolsado", ...amounts, code: outcome.returnCode, message: outcome.message })
     if (!recorded) {
       report.unrecorded.push({ requestId: id, returnCode: outcome.returnCode })
       console.error(`[avales] RELEASED BUT NOT RECORDED: request ${id}, return code ${outcome.returnCode}. Record it by hand.`)

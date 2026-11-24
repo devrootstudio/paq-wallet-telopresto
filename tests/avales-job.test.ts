@@ -66,6 +66,8 @@ async function world(mode: "test" | "real" = "test") {
     return { ok: true, simulated: true }
   }
   const disburse = vi.fn(async (): Promise<DisburseOutcome> => ({ success: true, returnCode: "0", message: "ok", contractUrl: "https://pdf.example/c.pdf" }))
+  // The applications record of each release (spied: no real Airtable).
+  const applications = vi.fn(async (): Promise<boolean> => true)
   const deps = (extra: Partial<JobDeps> = {}): JobDeps => ({
     airtable,
     whatsapp,
@@ -74,6 +76,7 @@ async function world(mode: "test" | "real" = "test") {
     now: () => now,
     claimSettleMs: 15,
     disburse,
+    applications,
     ...extra,
   })
   const run = (extra: Partial<JobDeps> = {}) => runGuarantorJob(deps(extra))
@@ -105,7 +108,7 @@ async function world(mode: "test" | "real" = "test") {
         return fake.fetch(url, init)
       }) as typeof fetch,
     })
-  return { fake, airtable, repo, requestId, sent, disburse, run, answer, reqRow, g, tokenOf, slowClient, setNow: (d: Date) => (now = d) }
+  return { fake, airtable, repo, requestId, sent, disburse, applications, run, answer, reqRow, g, tokenOf, slowClient, setNow: (d: Date) => (now = d) }
 }
 
 beforeEach(() => {
@@ -384,6 +387,99 @@ describe("steps 2–5: quorum and release", () => {
     w.disburse.mockRejectedValueOnce(new Error("socket hang up"))
     expect((await w.run()).released).toEqual([{ requestId: w.requestId, status: "release_failed" }])
     expect(w.reqRow().fields).toMatchObject({ status: "release_failed", "release-message": "release error: Error: socket hang up" })
+  })
+
+  describe("the release outcome is also recorded in applications", () => {
+    const appCalls = (w: Awaited<ReturnType<typeof world>>) => w.applications.mock.calls as unknown as [string, { step: string }, { test?: boolean }][]
+
+    it("a successful release records desembolsado with amount, commission, code and message (test mark from the request)", async () => {
+      const w = await world("test")
+      await w.airtable.update("requests", [{ id: w.requestId, fields: { status: "quorum" } }])
+      await w.run()
+      expect(w.applications).toHaveBeenCalledWith(
+        "SIM-job-0001",
+        { step: "desembolsado", requestedAmount: 1000, commission: 75, code: "0", message: "ok" },
+        { test: true },
+      )
+    })
+
+    it("a real request is recorded without the test mark", async () => {
+      const w = await world("real")
+      await w.airtable.update("requests", [{ id: w.requestId, fields: { status: "quorum" } }])
+      await w.run({ simulation: false, cupo: async () => ({ ok: true, cupoAutorizado: 3500, idSolicitud: "X", message: "" }) })
+      expect(appCalls(w)).toEqual([["REAL-job-0001", expect.objectContaining({ step: "desembolsado" }), { test: false }]])
+    })
+
+    it("a failed release records error/desembolso with the code and message", async () => {
+      const w = await world("test")
+      await w.airtable.update("requests", [{ id: w.requestId, fields: { status: "quorum" } }])
+      w.disburse.mockResolvedValueOnce({ success: false, returnCode: "12", message: "Rejected" })
+      await w.run()
+      expect(w.applications).toHaveBeenCalledWith(
+        "SIM-job-0001",
+        { step: "error", errorStep: "desembolso", error: { message: "Rejected", code: "12" }, disbursement: { requestedAmount: 1000, commission: 75 } },
+        { test: true },
+      )
+    })
+
+    it("a valida_cupo failure (error or rejection) records error/cupo, not desembolso", async () => {
+      const w = await world("test")
+      await w.airtable.update("requests", [{ id: w.requestId, fields: { status: "quorum" } }])
+      await w.run({ cupo: async () => ({ ok: false, cupoAutorizado: 0, idSolicitud: "", message: "Sin cupo" }) })
+      expect(appCalls(w).map((c) => c[1])).toEqual([{ step: "error", errorStep: "cupo", error: { message: "valida_cupo: Sin cupo" } }])
+
+      const w2 = await world("test")
+      await w2.airtable.update("requests", [{ id: w2.requestId, fields: { status: "quorum" } }])
+      await w2.run({ cupo: async () => Promise.reject(new Error("SOAP down")) })
+      expect(appCalls(w2).map((c) => (c[1] as { errorStep?: string }).errorStep)).toEqual(["cupo"])
+    })
+
+    it("desembolsado is recorded after the request write (which guards against a second release)", async () => {
+      const w = await world("test")
+      await w.airtable.update("requests", [{ id: w.requestId, fields: { status: "quorum" } }])
+      let statusSeen: unknown
+      w.applications.mockImplementation(async () => {
+        statusSeen = w.reqRow().fields.status
+        return true
+      })
+      await w.run()
+      expect(statusSeen).toBe("disbursed")
+    })
+
+    it("an unrecorded application (false) is noted in the report, the run goes on", async () => {
+      const w = await world("test")
+      await w.airtable.update("requests", [{ id: w.requestId, fields: { status: "quorum" } }])
+      w.applications.mockResolvedValue(false)
+      vi.spyOn(console, "error").mockImplementation(() => {})
+      const report = await w.run()
+      expect(report.released).toEqual([{ requestId: w.requestId, status: "disbursed", returnCode: "0" }])
+      expect(report.errors).toContainEqual(expect.objectContaining({ step: "application", id: w.requestId }))
+    })
+
+    it("cupo below the amount records error/cupo", async () => {
+      const w = await world("test")
+      await w.airtable.update("requests", [{ id: w.requestId, fields: { status: "quorum" } }])
+      await w.run({ cupo: async () => ({ ok: true, cupoAutorizado: 500, idSolicitud: "X", message: "" }) })
+      expect(appCalls(w).map((c) => c[1])).toEqual([{ step: "error", errorStep: "cupo", error: { message: "Cupo below the requested amount" } }])
+    })
+
+    it("an applications failure never affects the run, the claim or the release", async () => {
+      const w = await world("test")
+      await w.airtable.update("requests", [{ id: w.requestId, fields: { status: "quorum" } }])
+      w.applications.mockRejectedValue(new Error("airtable down"))
+      vi.spyOn(console, "error").mockImplementation(() => {})
+      const report = await w.run()
+      expect(report.released).toEqual([{ requestId: w.requestId, status: "disbursed", returnCode: "0" }])
+      expect(w.reqRow().fields.status).toBe("disbursed")
+      expect(report.errors.map((e) => e.step)).toContain("application")
+    })
+
+    it("two runs at once: one release, one desembolsado record", async () => {
+      const w = await world("test")
+      await w.airtable.update("requests", [{ id: w.requestId, fields: { status: "quorum" } }])
+      await Promise.all([w.run({ runId: "run-a" }), w.run({ runId: "run-b" })])
+      expect(appCalls(w).filter((c) => c[1].step === "desembolsado")).toHaveLength(1)
+    })
   })
 
   it("a request already releasing (another run owns it) is skipped", async () => {

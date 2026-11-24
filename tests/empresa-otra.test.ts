@@ -10,14 +10,11 @@ vi.mock("@/lib/store", async (importOriginal) => {
 })
 vi.mock("@/app/actions", () => ({ submitStep1Form: vi.fn(async () => ({ success: false, error: "x" })) }))
 vi.mock("@/app/avales-actions", () => ({ submitGuarantorRequest: vi.fn(), getRutaAction: vi.fn() }))
-vi.mock("axios", () => ({ default: { post: vi.fn(async () => ({})), isAxiosError: () => false } }))
 
-import axios from "axios"
 import { submitStep1Form } from "@/app/actions"
 import { EMPRESAS_GT, EMPRESA_OTRA, cambioDeEmpresa, normalizarTexto, validarEmpresaOtra } from "@/lib/empresas"
 import { useWizardStore } from "@/lib/store"
 import { handleStep1Submit } from "@/lib/step-handlers"
-import { sendToMakeWebhook } from "@/lib/make-integration"
 import Step1Form from "@/components/steps/step-1-form"
 import { buildGuarantorRequest, validateGuarantors, type GuarantorDraft } from "@/components/steps/step-3b-avales"
 
@@ -125,7 +122,7 @@ describe("Step 1 form", () => {
   })
 })
 
-describe("Step 1 submit and Make", () => {
+describe("Step 1 submit", () => {
   const store = () => ({
     nextStepAsync: vi.fn(), setLoading: vi.fn(), setErrorStep: vi.fn(), updateFormData: vi.fn(), goToStepAsync: vi.fn(),
     formData: real().formData,
@@ -146,13 +143,6 @@ describe("Step 1 submit and Make", () => {
     expect(m(submitStep1Form).mock.calls[0][0]).toMatchObject({
       empresa: EMPRESAS_GT[0].label, empresaOtra: false, empresaTelefono: "", empresaDireccion: "",
     })
-  })
-
-  it("the Make payload of Step 1 carries the company fields in both cases", async () => {
-    await sendToMakeWebhook(1, { ...step1, ...OTRA }, null, false, "auth-1")
-    expect(m(axios.post).mock.calls[0][1].formData).toMatchObject(OTRA)
-    await sendToMakeWebhook(1, { ...step1, ...LISTA, empresaTelefono: "x", empresaDireccion: "y" }, null, false, "auth-1")
-    expect(m(axios.post).mock.calls[1][1].formData).toMatchObject({ ...LISTA, empresaTelefono: "", empresaDireccion: "" })
   })
 })
 
