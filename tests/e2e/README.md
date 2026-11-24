@@ -17,7 +17,11 @@ Aceptar un aval consulta **RENAP de verdad**: el DPI y el nombre completo tienen
 
 Necesita personas reales que acepten ser aval de prueba, con su DPI y su nombre completo **exactos** (tal como están en RENAP). Las tildes y las mayúsculas no importan, pero no puede faltar ni sobrar ningún nombre ni apellido. Nunca uses datos de alguien sin su permiso, ni los escribas en archivos, issues o logs.
 
-Además, el server necesita `RENAP_TOKEN` (y, si hace falta, `RENAP_BASE_URL`) en su entorno, y acceso a la API de RENAP desde esa máquina.
+> **Los datos quedan guardados.** El DPI, el nombre, el teléfono y la respuesta completa de RENAP (`renap-raw`, con los datos oficiales de la persona) quedan en la tabla de avales de la base, como evidencia. Quien es dueño de los datos decide cuándo purgarlos; los agentes nunca borran registros.
+
+**Con una sola persona real** solo se prueban los pasos 3 y 4 en un aval (identidad que no coincide y aceptación). El quórum, el desembolso y el link 3 cerrado (pasos 5 y 6) necesitan una **segunda** persona real que dé su permiso; sin ella, la solicitud se queda con un solo aval autorizado.
+
+Además, el server necesita en su entorno `RENAP_TOKEN` y acceso a la API de RENAP desde esa máquina. `RENAP_BASE_URL` es opcional y es solo el origen (`https://host`, sin ruta ni `/` final); si falta, se usa el de por defecto del código.
 
 1. Abre `/dev/avales/solicitud` y llena los 3 avales: en el aval 1 y el aval 2 pon el DPI y el nombre completo exactos de las personas reales, y en el aval 3 datos ficticios. Envía.
 2. Abre `/dev/avales/rutina` y pulsa **Correr rutina**: el reporte trae los 3 links.
@@ -34,7 +38,7 @@ Además, el server necesita `RENAP_TOKEN` (y, si hace falta, `RENAP_BASE_URL`) e
 - `next dev` con `ENABLE_TEST_BYPASS=true`. Simula `valida_cupo` y el desembolso; WhatsApp siempre está simulado. RENAP **no** se simula.
 - Credenciales del almacenamiento (`AIRTABLE_TOKEN`, `AIRTABLE_BASE_ID`) en el entorno del server. Los tests no las leen.
 - `JOBS_SECRET` es opcional: con el bypass, la rutina acepta el valor de desarrollo.
-- `RENAP_TOKEN` solo para la prueba manual de aceptación.
+- `RENAP_TOKEN` (y, opcional, `RENAP_BASE_URL`, solo el origen `https://host`) solo para la prueba manual de aceptación.
 
 ## Correr
 

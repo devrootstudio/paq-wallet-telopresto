@@ -126,9 +126,7 @@ export async function reject(page: Page) {
   await page.getByRole("button", { name: "Sí, rechazar" }).click()
 }
 
-export const THANKS = "¡Gracias por tu apoyo!"
 export const REJECTED = "Registramos que no avalas la solicitud"
 export const CLOSED = "Esta solicitud ya se resolvió"
 export const EXPIRED = "Esta solicitud venció"
-export const CHECK_DATA = "No pudimos confirmar tus datos"
 export const BUSY = "Estamos registrando otra respuesta"
