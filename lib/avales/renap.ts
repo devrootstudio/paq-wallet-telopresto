@@ -36,16 +36,29 @@ export type RenapChecker = (query: RenapQuery) => Promise<RenapOutcome>
 
 type Candidate = Record<string, unknown>
 
+/** Origin of the GTS API (scheme + host only; the path is added here). RENAP_BASE_URL overrides it. */
 export const DEFAULT_RENAP_BASE_URL = "https://api-info.gts-guatemala.com"
 
 /** Name parts of a RENAP record, in order. TERCER_NOMBRE and others may be null or empty. */
 const NAME_PARTS = ["PRIMER_NOMBRE", "SEGUNDO_NOMBRE", "TERCER_NOMBRE", "PRIMER_APELLIDO", "SEGUNDO_APELLIDO"] as const
 
-/** Upper case, no diacritics, single spaces, trimmed. */
+/** Combining diacritical marks (left over after NFD), dropped when normalizing. */
+const COMBINING_FIRST = 0x300
+const COMBINING_LAST = 0x36f
+/** Zero-width space, non-joiner, joiner and BOM, dropped when normalizing. */
+const ZERO_WIDTH = new Set([0x200b, 0x200c, 0x200d, 0xfeff])
+
+/**
+ * Upper case, no diacritics, no zero-width characters, single spaces, trimmed.
+ * Built from code points (no invisible characters or escapes in this source).
+ */
 export function normalizeName(name: string): string {
-  return name
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+  return Array.from(name.normalize("NFD"))
+    .filter((ch) => {
+      const cp = ch.codePointAt(0)!
+      return !(cp >= COMBINING_FIRST && cp <= COMBINING_LAST) && !ZERO_WIDTH.has(cp)
+    })
+    .join("")
     .toUpperCase()
     .replace(/\s+/g, " ")
     .trim()
@@ -60,23 +73,39 @@ export function officialNameOf(c: Candidate): string {
     .replace(/\s+/g, " ")
 }
 
-/** Accepts an array, `{ data: [...] }` or `{ results: [...] }`. */
-export function normalizeCandidates(body: unknown): Candidate[] {
-  const list = Array.isArray(body)
-    ? body
-    : body && typeof body === "object"
-      ? ((body as { data?: unknown }).data ?? (body as { results?: unknown }).results)
-      : undefined
-  return Array.isArray(list) ? list.filter((c): c is Candidate => !!c && typeof c === "object") : []
+/**
+ * The candidates of a search response, or null when the body is not a recognizable result list.
+ * Only `{ data: [...] }` or a bare array count (`data: []` is a valid empty result).
+ */
+export function normalizeCandidates(body: unknown): Candidate[] | null {
+  const list = Array.isArray(body) ? body : body && typeof body === "object" ? (body as { data?: unknown }).data : undefined
+  return Array.isArray(list) ? list.filter((c): c is Candidate => !!c && typeof c === "object") : null
 }
 
-/** Classifies a search response for one DPI and the full name the guarantor typed. */
+const DPI_PATTERN = /^\d{13}$/
+
+/**
+ * Classifies a search response for one DPI and the full name the guarantor typed:
+ * - `MATCH_UNICO`: a candidate has that CUI and the same normalized full name (non-empty);
+ * - `NOMBRE_NO_COINCIDE`: a candidate has that CUI but another name;
+ * - `HOMONIMOS`: several candidates, none with that CUI (the search is by DPI, so these are other people);
+ * - `SIN_RESULTADOS`: no candidate with that CUI (zero or one candidate);
+ * - `ERROR`: the body is not a recognizable result list.
+ * A DPI that is not 13 digits never matches.
+ */
 export function classify(body: unknown, identification: string, fullName: string): RenapOutcome {
   const candidates = normalizeCandidates(body)
-  const sameCui = candidates.filter((c) => String(c.CUI ?? c.cui ?? "").replace(/\D/g, "") === identification)
+  if (!candidates) return { result: "ERROR", matched: false, raw: body }
+  const sameCui = DPI_PATTERN.test(identification)
+    ? candidates.filter((c) => String(c.CUI ?? c.cui ?? "").replace(/\D/g, "") === identification)
+    : []
   if (sameCui.length > 0) {
     const wanted = normalizeName(fullName)
-    const match = sameCui.find((c) => normalizeName(officialNameOf(c)) === wanted)
+    // An empty name (blank, or only marks / zero-width characters) never matches anything.
+    const match = wanted === "" ? undefined : sameCui.find((c) => {
+      const official = normalizeName(officialNameOf(c))
+      return official !== "" && official === wanted
+    })
     if (match) return { result: "MATCH_UNICO", matched: true, officialName: officialNameOf(match), raw: body }
     return { result: "NOMBRE_NO_COINCIDE", matched: false, officialName: officialNameOf(sameCui[0]), raw: body }
   }
@@ -107,6 +136,8 @@ export function createRenapClient(options: RenapClientOptions): RenapChecker {
         headers: { Authorization: `Bearer ${options.token}` },
         signal: AbortSignal.timeout(timeoutMs),
         cache: "no-store",
+        // Never follow a redirect: it would drop or leak the Authorization header.
+        redirect: "error",
       })
       if (!res.ok) return { result: "ERROR", matched: false, raw: { error: `HTTP_${res.status}` } }
       return classify(await res.json(), identification, fullName)
@@ -118,7 +149,8 @@ export function createRenapClient(options: RenapClientOptions): RenapChecker {
 }
 
 /**
- * The real client when RENAP_TOKEN is set (RENAP_BASE_URL optional, https by default), whatever
+ * The real client when RENAP_TOKEN is set (RENAP_BASE_URL optional: the origin only, scheme + host,
+ * no path; https by default), whatever
  * the test bypass says; otherwise null, and `accept` answers `unavailable`.
  */
 export function renapFromEnv(env: Env = process.env): RenapChecker | null {

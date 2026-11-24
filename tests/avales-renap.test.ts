@@ -38,12 +38,21 @@ describe("name normalization and official name", () => {
     expect(officialNameOf(record({ TERCER_NOMBRE: "Luis" }))).toBe("José Ángel Luis Pérez Núñez")
   })
 
-  it("normalizes an array, { data } or { results }", () => {
+  it("drops zero-width characters (U+200B–U+200D, U+FEFF) and stray combining marks", () => {
+    const zw = [0x200b, 0x200c, 0x200d, 0xfeff].map((cp) => String.fromCodePoint(cp))
+    const acute = String.fromCodePoint(0x301)
+    expect(normalizeName(`Jo${zw[0]}sé ${zw[1]}Ángel${zw[2]} Pérez${zw[3]} Núñez`)).toBe("JOSE ANGEL PEREZ NUNEZ")
+    expect(normalizeName(`${acute}${zw.join("")}  `)).toBe("")
+  })
+
+  it("only { data: [...] } or a bare array are a result list; anything else is not recognized", () => {
     const c = [record()]
     expect(normalizeCandidates(c)).toEqual(c)
     expect(normalizeCandidates(body(...c))).toEqual(c)
-    expect(normalizeCandidates({ results: c })).toEqual(c)
-    expect(normalizeCandidates(null)).toEqual([])
+    expect(normalizeCandidates({ data: [] })).toEqual([])
+    for (const unknown of [null, "x", { error: "Forbidden" }, { data: null }, { results: c }, { data: { CUI: DPI } }]) {
+      expect(normalizeCandidates(unknown)).toBeNull()
+    }
   })
 })
 
@@ -76,8 +85,31 @@ describe("classify: DPI and exact full name", () => {
     expect(classify(body(other), DPI, query.fullName).officialName).toBeUndefined()
   })
 
-  it("no candidates → SIN_RESULTADOS", () => {
+  it("no candidates (data: []) → SIN_RESULTADOS", () => {
     expect(classify(body(), DPI, query.fullName)).toMatchObject({ result: "SIN_RESULTADOS", matched: false })
+  })
+
+  it("an empty name never matches, even against a record without name parts", () => {
+    const nameless = record({ PRIMER_NOMBRE: null, SEGUNDO_NOMBRE: "", PRIMER_APELLIDO: null, SEGUNDO_APELLIDO: null })
+    const onlyMark = String.fromCodePoint(0x301)
+    for (const typed of [onlyMark, "", "   ", String.fromCodePoint(0x200b)]) {
+      expect(classify(body(nameless), DPI, typed)).toMatchObject({ result: "NOMBRE_NO_COINCIDE", matched: false })
+      expect(classify(body(record()), DPI, typed).matched).toBe(false)
+    }
+  })
+
+  it("a 200 without a recognizable result list → ERROR (not a mismatch)", () => {
+    for (const unknown of [{ error: "Forbidden" }, { data: null }, { results: [record()] }, "<html>"]) {
+      expect(classify(unknown, DPI, query.fullName)).toEqual({ result: "ERROR", matched: false, raw: unknown })
+    }
+  })
+
+  it("a DPI that is not 13 digits never matches", () => {
+    for (const dpi of ["300000000012", "30000000001234", "300000000012a", ""]) {
+      const r = classify(body(record({ CUI: dpi })), dpi, query.fullName)
+      expect(r.matched).toBe(false)
+      expect(r.result).not.toBe("MATCH_UNICO")
+    }
   })
 })
 
@@ -94,6 +126,7 @@ describe("createRenapClient (fetch mocked, never the real API)", () => {
     expect(String(url)).toBe(`https://renap.test/api/infos/search?q=${DPI}&limit=10&page=1`)
     expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer tok-123")
     expect(init?.method ?? "GET").toBe("GET")
+    expect(init?.redirect).toBe("error") // never follow a redirect with the token
   })
 
   it("an http base is upgraded to https (http answers 301 and fetch drops the header)", async () => {
@@ -110,6 +143,12 @@ describe("createRenapClient (fetch mocked, never the real API)", () => {
       expect(await check(query)).toEqual({ result: "ERROR", matched: false, raw: { error: `HTTP_${status}` } })
       expect(fetchMock).toHaveBeenCalledTimes(1)
     }
+  })
+
+  it("a 200 whose body is not a result list → ERROR", async () => {
+    const fetchMock = respond(200, { error: "Acceso denegado." })
+    const check = createRenapClient({ baseUrl: "https://renap.test", token: "t", fetch: fetchMock as typeof fetch })
+    expect(await check(query)).toMatchObject({ result: "ERROR", matched: false })
   })
 
   it("timeouts and network failures → ERROR, never a throw", async () => {

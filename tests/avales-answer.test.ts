@@ -75,8 +75,10 @@ describe("answerGuarantor: reject", () => {
 
 describe("answerGuarantor: accept", () => {
   it("RENAP match → authorized; stores the confirmed data, RENAP result, raw and the declaration hash", async () => {
-    const { deps, tokens, g } = world()
+    const { deps, tokens, g, fake } = world()
     expect(await answerGuarantorWith(deps, tokens[0], "accept", accept(), META)).toEqual({ ok: true, status: "authorized" })
+    const authorizedWrite = fake.calls.find((c) => c.method === "PATCH" && (c.body ?? "").includes('"status":"authorized"'))
+    expect(JSON.parse(authorizedWrite!.body!).typecast).toBeUndefined() // typecast only on the mismatch write
     const f = g(1).fields
     expect(f).toMatchObject({
       status: "authorized",
@@ -111,9 +113,12 @@ describe("answerGuarantor: accept", () => {
   })
 
   it("RENAP error (DPI ending in 9999) → unavailable, status unchanged, attempt recorded", async () => {
-    const { deps, tokens, g } = world()
+    const { deps, tokens, g, fake } = world()
     expect(await answerGuarantorWith(deps, tokens[0], "accept", accept("1234567899999"), META)).toEqual({ ok: false, code: "unavailable" })
     expect(g(1).fields).toMatchObject({ status: "invited", "renap-result": "ERROR" })
+    // Only the mismatch write uses typecast; this one carries a known option.
+    const write = fake.calls.find((c) => c.method === "PATCH" && (c.body ?? "").includes('"renap-result":"ERROR"'))
+    expect(JSON.parse(write!.body!).typecast).toBeUndefined()
   })
 
   it("RENAP not configured → unavailable", async () => {

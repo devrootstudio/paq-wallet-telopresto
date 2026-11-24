@@ -36,7 +36,7 @@ import type { AnswerResult, GuarantorAnswer, GuarantorAnswerInput } from "./type
 /** Pause between writing the answer claim and re-reading it. Longer than two slow Airtable calls. */
 export const ANSWER_CLAIM_SETTLE_MS = 3000
 
-/** Longer than the slowest RENAP check (two authentications and two searches of 25 s). */
+/** Longer than the slowest RENAP check (one search with a 25 s timeout) plus the Airtable calls around it. */
 export const ANSWER_CLAIM_LEASE_MS = 120_000
 
 /** Airtable long text holds 100,000 characters; keep the raw RENAP response below that. */
@@ -116,9 +116,8 @@ export async function answerGuarantorWith(
 
   let released = false
   /** Writes `fields` and frees the claim (we hold it): the link stays open. */
-  const release = async (fields: Record<string, unknown> = {}) => {
-    // typecast: `renap-result` may carry an option the select does not have yet (e.g. NOMBRE_NO_COINCIDE).
-    await deps.airtable.update(TABLES.guarantors, [{ id, fields: { ...fields, "answer-claim": "" } }], { typecast: true })
+  const release = async (fields: Record<string, unknown> = {}, opts: { typecast?: boolean } = {}) => {
+    await deps.airtable.update(TABLES.guarantors, [{ id, fields: { ...fields, "answer-claim": "" } }], opts.typecast ? { typecast: true } : undefined)
     released = true
   }
   /** Frees the claim only if it is still ours (never another answer's). */
@@ -196,7 +195,8 @@ export async function answerGuarantorWith(
     }
     if (!check.matched) {
       // The link stays open to correct the data: free the claim.
-      await release({ ...renapFields, status: "identity_mismatch" satisfies GuarantorStatus, evidence: evidence({ confirmed }) })
+      // typecast only here: the one write that can carry NOMBRE_NO_COINCIDE, an option the select may lack.
+      await release({ ...renapFields, status: "identity_mismatch" satisfies GuarantorStatus, evidence: evidence({ confirmed }) }, { typecast: true })
       return { ok: true, status: "identity_mismatch" }
     }
 
@@ -214,7 +214,7 @@ export async function answerGuarantorWith(
           evidence: evidence({ confirmed, officialName: check.officialName ?? null }),
         },
       },
-    ], { typecast: true })
+    ])
     return { ok: true, status: "authorized" }
   }
 
