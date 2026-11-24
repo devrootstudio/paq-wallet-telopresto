@@ -117,7 +117,8 @@ export async function answerGuarantorWith(
   let released = false
   /** Writes `fields` and frees the claim (we hold it): the link stays open. */
   const release = async (fields: Record<string, unknown> = {}) => {
-    await deps.airtable.update(TABLES.guarantors, [{ id, fields: { ...fields, "answer-claim": "" } }])
+    // typecast: `renap-result` may carry an option the select does not have yet (e.g. NOMBRE_NO_COINCIDE).
+    await deps.airtable.update(TABLES.guarantors, [{ id, fields: { ...fields, "answer-claim": "" } }], { typecast: true })
     released = true
   }
   /** Frees the claim only if it is still ours (never another answer's). */
@@ -213,7 +214,7 @@ export async function answerGuarantorWith(
           evidence: evidence({ confirmed, officialName: check.officialName ?? null }),
         },
       },
-    ])
+    ], { typecast: true })
     return { ok: true, status: "authorized" }
   }
 

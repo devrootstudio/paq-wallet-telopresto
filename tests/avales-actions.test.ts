@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { cookieJar } from "./setup"
 import { createFakeAirtable } from "./avales-fake-airtable"
+import { withFakeRenapApi, type RenapCall } from "./avales-fake-renap"
 import { generateToken, hashToken } from "@/lib/avales/tokens"
 import { DECLARATION_TEXT } from "@/lib/avales/declaration"
 import type { GuarantorRequestInput } from "@/lib/avales/types"
@@ -193,19 +194,34 @@ describe("answerGuarantor", () => {
   }
   const confirm = { fullName: "Aval Uno", identification: "0000000000001", phone: "55550001", acceptedText: DECLARATION_TEXT }
 
-  it("with the test bypass, accepts through simulated RENAP and logs no PII nor token", async () => {
+  it("with RENAP_TOKEN, accepts through the RENAP API (DPI + exact name) and logs no PII nor token", async () => {
     vi.stubEnv("ENABLE_TEST_BYPASS", "true")
+    vi.stubEnv("RENAP_TOKEN", "renap-test-token")
+    const calls: RenapCall[] = []
+    vi.stubGlobal("fetch", withFakeRenapApi(fake.fetch, { "0000000000001": "Aval Uno" }, calls))
     const token = await linkForFirstGuarantor()
     expect(await answerGuarantor(token, "accept", confirm)).toEqual({ ok: true, status: "authorized" })
-    expect(fake.rows("guarantors")[0].fields.status).toBe("authorized")
+    expect(calls).toEqual([
+      { url: "https://api-info.gts-guatemala.com/api/infos/search?q=0000000000001&limit=10&page=1", authorization: "Bearer renap-test-token" },
+    ])
+    expect(fake.rows("guarantors")[0].fields).toMatchObject({ status: "authorized", "renap-result": "MATCH_UNICO" })
     expect(fake.rows("requests")[0].fields.test).toBe(true) // created in simulation → test data
     expect(await answerGuarantor(token, "reject", { fullName: "", identification: "", phone: "" })).toEqual({ ok: false, code: "closed" })
-    expectNoPiiInLogs([token])
+    expectNoPiiInLogs([token, "renap-test-token"])
   })
 
-  it("never simulates in production: without RENAP credentials, accept is unavailable", async () => {
+  it("the same DPI with another name is an identity mismatch", async () => {
     vi.stubEnv("ENABLE_TEST_BYPASS", "true")
-    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("RENAP_TOKEN", "renap-test-token")
+    vi.stubGlobal("fetch", withFakeRenapApi(fake.fetch, { "0000000000001": "Persona Distinta Ficticia" }))
+    const token = await linkForFirstGuarantor()
+    expect(await answerGuarantor(token, "accept", confirm)).toEqual({ ok: true, status: "identity_mismatch" })
+    expect(fake.rows("guarantors")[0].fields["renap-result"]).toBe("NOMBRE_NO_COINCIDE")
+  })
+
+  it("no simulation: with the bypass but without RENAP_TOKEN, accept is unavailable", async () => {
+    vi.stubEnv("ENABLE_TEST_BYPASS", "true")
+    vi.stubEnv("RENAP_TOKEN", "")
     const token = await linkForFirstGuarantor()
     expect(await answerGuarantor(token, "accept", confirm)).toEqual({ ok: false, code: "unavailable" })
     expect(fake.rows("guarantors")[0].fields.status).toBe("pending")

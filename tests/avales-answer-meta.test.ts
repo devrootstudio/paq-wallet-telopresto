@@ -8,6 +8,7 @@ vi.mock("next/headers", () => ({
 }))
 
 import { createFakeAirtable } from "./avales-fake-airtable"
+import { withFakeRenapApi } from "./avales-fake-renap"
 import { generateToken, hashToken } from "@/lib/avales/tokens"
 import { DECLARATION_TEXT } from "@/lib/avales/declaration"
 import { answerGuarantor } from "@/app/avales-actions"
@@ -16,7 +17,9 @@ let fake: ReturnType<typeof createFakeAirtable>
 
 beforeEach(() => {
   fake = createFakeAirtable()
-  vi.stubGlobal("fetch", fake.fetch)
+  // RENAP answers like the real API for this fictitious guarantor.
+  vi.stubGlobal("fetch", withFakeRenapApi(fake.fetch, { "2000000000001": "Aval Uno" }))
+  vi.stubEnv("RENAP_TOKEN", "renap-test-token")
   vi.stubEnv("AIRTABLE_TOKEN", "test-airtable-token")
   vi.stubEnv("AIRTABLE_BASE_ID", "appTEST0000000000")
   vi.stubEnv("ENABLE_TEST_BYPASS", "true")

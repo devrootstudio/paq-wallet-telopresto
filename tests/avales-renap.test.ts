@@ -1,107 +1,148 @@
 import { describe, it, expect, vi } from "vitest"
-import { classify, createRenapClient, normalizeCandidates, renapFromEnv, simulatedRenap } from "@/lib/avales/renap"
+import {
+  classify,
+  createRenapClient,
+  DEFAULT_RENAP_BASE_URL,
+  normalizeBaseUrl,
+  normalizeCandidates,
+  normalizeName,
+  officialNameOf,
+  renapFromEnv,
+} from "@/lib/avales/renap"
 
-const DPI = "0000000000123"
-const query = { fullName: "Persona Ficticia", identification: DPI, phone: "55550001" }
+// Fictitious people only.
+const DPI = "3000000000123"
+const record = (overrides: Record<string, unknown> = {}) => ({
+  CUI: DPI,
+  PRIMER_NOMBRE: "José",
+  SEGUNDO_NOMBRE: "Ángel",
+  TERCER_NOMBRE: null,
+  PRIMER_APELLIDO: "Pérez",
+  SEGUNDO_APELLIDO: "Núñez",
+  FECHA_NACIMIENTO: "1990-01-01",
+  TELEFONO: "55550001",
+  relevance: 10,
+  ...overrides,
+})
+const body = (...data: unknown[]) => ({ data, meta: { pagination: { page: 1, pageSize: 10, total: data.length }, query: DPI } })
+const query = { fullName: "José Ángel Pérez Núñez", identification: DPI, phone: "55550001" }
 
-describe("classify", () => {
+describe("name normalization and official name", () => {
+  it("removes accents, upper-cases, collapses spaces and trims", () => {
+    expect(normalizeName("  josé   ÁNGEL pérez  núñez ")).toBe("JOSE ANGEL PEREZ NUNEZ")
+  })
+
+  it("joins the name parts in order and skips null or empty ones", () => {
+    expect(officialNameOf(record())).toBe("José Ángel Pérez Núñez")
+    expect(officialNameOf(record({ SEGUNDO_NOMBRE: "", TERCER_NOMBRE: null }))).toBe("José Pérez Núñez")
+    expect(officialNameOf(record({ TERCER_NOMBRE: "Luis" }))).toBe("José Ángel Luis Pérez Núñez")
+  })
+
   it("normalizes an array, { data } or { results }", () => {
-    const c = [{ CUI: DPI }]
+    const c = [record()]
     expect(normalizeCandidates(c)).toEqual(c)
-    expect(normalizeCandidates({ data: c })).toEqual(c)
+    expect(normalizeCandidates(body(...c))).toEqual(c)
     expect(normalizeCandidates({ results: c })).toEqual(c)
     expect(normalizeCandidates(null)).toEqual([])
-    expect(normalizeCandidates({ other: 1 })).toEqual([])
   })
+})
 
-  it("authorizes only when some candidate's CUI equals the DPI", () => {
-    expect(classify([{ CUI: "0000000000999" }, { CUI: DPI, NOMBRE_COMPLETO: "PERSONA  FICTICIA" }], DPI)).toMatchObject({
+describe("classify: DPI and exact full name", () => {
+  it("matches with accents and case differences and a null third name", () => {
+    expect(classify(body(record()), DPI, "jose angel PEREZ nunez")).toMatchObject({
       result: "MATCH_UNICO",
       matched: true,
-      officialName: "PERSONA FICTICIA",
+      officialName: "José Ángel Pérez Núñez",
     })
-    expect(classify([{ CUI: DPI }, { CUI: DPI }], DPI)).toMatchObject({ result: "MATCH_UNICO", matched: true })
-    expect(classify([{ CUI: "1" }, { CUI: "2" }], DPI)).toMatchObject({ result: "HOMONIMOS", matched: false })
-    expect(classify([{ CUI: "1" }], DPI)).toMatchObject({ result: "SIN_RESULTADOS", matched: false })
-    expect(classify([], DPI)).toMatchObject({ result: "SIN_RESULTADOS", matched: false })
   })
 
-  it("always keeps the raw response", () => {
-    const body = { results: [{ CUI: DPI }] }
-    expect(classify(body, DPI).raw).toBe(body)
+  it("same CUI with another name → NOMBRE_NO_COINCIDE, not matched", () => {
+    expect(classify(body(record()), DPI, "Otra Persona Distinta")).toEqual({
+      result: "NOMBRE_NO_COINCIDE",
+      matched: false,
+      officialName: "José Ángel Pérez Núñez",
+      raw: body(record()),
+    })
+  })
+
+  it("a missing second name does not pass", () => {
+    expect(classify(body(record()), DPI, "José Pérez Núñez")).toMatchObject({ result: "NOMBRE_NO_COINCIDE", matched: false })
+  })
+
+  it("the right name with another CUI does not pass", () => {
+    const other = record({ CUI: "3000000000999" })
+    expect(classify(body(other), DPI, query.fullName)).toEqual({ result: "SIN_RESULTADOS", matched: false, raw: body(other) })
+    expect(classify(body(other, record({ CUI: "3000000000888" })), DPI, query.fullName)).toMatchObject({ result: "HOMONIMOS", matched: false })
+    expect(classify(body(other), DPI, query.fullName).officialName).toBeUndefined()
+  })
+
+  it("no candidates → SIN_RESULTADOS", () => {
+    expect(classify(body(), DPI, query.fullName)).toMatchObject({ result: "SIN_RESULTADOS", matched: false })
   })
 })
 
-describe("simulatedRenap", () => {
-  it("matches, except DPI ending in 0000 (no match) or 9999 (error)", async () => {
-    expect(await simulatedRenap(query)).toMatchObject({ result: "MATCH_UNICO", matched: true })
-    expect(await simulatedRenap({ ...query, identification: "1234567890000" })).toMatchObject({ result: "SIN_RESULTADOS", matched: false })
-    expect(await simulatedRenap({ ...query, identification: "1234567899999" })).toMatchObject({ result: "ERROR", matched: false })
-  })
-})
+describe("createRenapClient (fetch mocked, never the real API)", () => {
+  const respond = (status: number, payload: unknown = body(record())) =>
+    vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify(payload), { status }))
 
-describe("createRenapClient (real GTS API, fetch mocked)", () => {
-  function server(opts: { searchStatuses?: number[]; body?: unknown } = {}) {
-    const statuses = [...(opts.searchStatuses ?? [200])]
-    const calls: { url: string; auth?: string; body?: string }[] = []
-    let issued = 0
-    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-      const u = String(url)
-      calls.push({ url: u, auth: (init?.headers as Record<string, string> | undefined)?.Authorization, body: init?.body as string | undefined })
-      if (u.endsWith("/api/auth/local")) return new Response(JSON.stringify({ jwt: `jwt-${++issued}` }), { status: 200 })
-      const status = statuses.shift() ?? 200
-      return new Response(JSON.stringify(opts.body ?? { data: [{ CUI: DPI, NOMBRE: "PERSONA FICTICIA" }] }), { status })
-    })
-    return { fetchMock, calls }
-  }
-
-  it("authenticates, searches by full name and classifies", async () => {
-    const { fetchMock, calls } = server()
-    const check = createRenapClient({ baseUrl: "http://renap.test/", identifier: "id", password: "pw", fetch: fetchMock as typeof fetch })
-    expect(await check(query)).toMatchObject({ result: "MATCH_UNICO", matched: true, officialName: "PERSONA FICTICIA" })
-    expect(calls[0]).toMatchObject({ url: "http://renap.test/api/auth/local", body: JSON.stringify({ identifier: "id", password: "pw" }) })
-    expect(calls[1]).toMatchObject({ url: "http://renap.test/api/infos/search?q=Persona%20Ficticia", auth: "Bearer jwt-1" })
+  it("one GET by DPI with the exact URL and Bearer token, no login", async () => {
+    const fetchMock = respond(200)
+    const check = createRenapClient({ baseUrl: "https://renap.test/", token: "tok-123", fetch: fetchMock as typeof fetch })
+    expect(await check(query)).toMatchObject({ result: "MATCH_UNICO", matched: true })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe(`https://renap.test/api/infos/search?q=${DPI}&limit=10&page=1`)
+    expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer tok-123")
+    expect(init?.method ?? "GET").toBe("GET")
   })
 
-  it("keeps the JWT for 50 minutes", async () => {
-    let t = 0
-    const { fetchMock, calls } = server()
-    const check = createRenapClient({ baseUrl: "http://renap.test", identifier: "i", password: "p", fetch: fetchMock as typeof fetch, now: () => t })
-    await check(query)
-    t = 49 * 60 * 1000
-    await check(query)
-    expect(calls.filter((c) => c.url.endsWith("/auth/local"))).toHaveLength(1)
-    t = 51 * 60 * 1000
-    await check(query)
-    expect(calls.filter((c) => c.url.endsWith("/auth/local"))).toHaveLength(2)
+  it("an http base is upgraded to https (http answers 301 and fetch drops the header)", async () => {
+    expect(normalizeBaseUrl("http://renap.test//")).toBe("https://renap.test")
+    const fetchMock = respond(200)
+    await createRenapClient({ baseUrl: "http://renap.test", token: "t", fetch: fetchMock as typeof fetch })(query)
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/^https:\/\/renap\.test\/api\/infos\/search\?/)
   })
 
-  it("re-authenticates once after a 401, and reports ERROR if it fails again", async () => {
-    const retried = server({ searchStatuses: [401, 200] })
-    const ok = createRenapClient({ baseUrl: "http://renap.test", identifier: "i", password: "p", fetch: retried.fetchMock as typeof fetch })
-    expect(await ok(query)).toMatchObject({ matched: true })
-    expect(retried.calls.map((c) => c.auth).filter(Boolean)).toEqual(["Bearer jwt-1", "Bearer jwt-2"])
-
-    const twice = server({ searchStatuses: [401, 401] })
-    const bad = createRenapClient({ baseUrl: "http://renap.test", identifier: "i", password: "p", fetch: twice.fetchMock as typeof fetch })
-    expect(await bad(query)).toEqual({ result: "ERROR", matched: false, raw: { error: "HTTP_401" } })
-    expect(twice.calls.filter((c) => c.url.includes("/search"))).toHaveLength(2)
+  it("401, 403 and any non-2xx → ERROR with the status, no retry", async () => {
+    for (const status of [401, 403, 500]) {
+      const fetchMock = respond(status, { error: "Forbidden" })
+      const check = createRenapClient({ baseUrl: "https://renap.test", token: "t", fetch: fetchMock as typeof fetch })
+      expect(await check(query)).toEqual({ result: "ERROR", matched: false, raw: { error: `HTTP_${status}` } })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    }
   })
 
-  it("network failures and timeouts become ERROR, never a throw", async () => {
+  it("timeouts and network failures → ERROR, never a throw", async () => {
     const timeout = Object.assign(new Error("timed out"), { name: "TimeoutError" })
-    const check = createRenapClient({ baseUrl: "http://renap.test", identifier: "i", password: "p", fetch: (async () => Promise.reject(timeout)) as typeof fetch })
-    expect(await check(query)).toEqual({ result: "ERROR", matched: false, raw: { error: "TIMEOUT" } })
+    const t = createRenapClient({ baseUrl: "https://renap.test", token: "t", fetch: (async () => Promise.reject(timeout)) as typeof fetch })
+    expect(await t(query)).toEqual({ result: "ERROR", matched: false, raw: { error: "TIMEOUT" } })
+    const n = createRenapClient({ baseUrl: "https://renap.test", token: "t", fetch: (async () => Promise.reject(new Error("down"))) as typeof fetch })
+    expect(await n(query)).toEqual({ result: "ERROR", matched: false, raw: { error: "REQUEST_FAILED" } })
   })
 })
 
-describe("renapFromEnv", () => {
-  it("simulated only with the bypass outside production; real with credentials; otherwise null", () => {
-    expect(renapFromEnv({ ENABLE_TEST_BYPASS: "true", NODE_ENV: "development" })).toBe(simulatedRenap)
-    expect(renapFromEnv({ ENABLE_TEST_BYPASS: "true", NODE_ENV: "production" })).toBeNull()
-    expect(renapFromEnv({ NODE_ENV: "development" })).toBeNull()
-    const real = renapFromEnv({ NODE_ENV: "production", RENAP_BASE_URL: "http://r", RENAP_IDENTIFIER: "i", RENAP_PASSWORD: "p" })
-    expect(real).not.toBeNull()
-    expect(real).not.toBe(simulatedRenap)
+describe("renapFromEnv: no simulation", () => {
+  it("with the bypass and without a token → null (accept answers unavailable)", () => {
+    expect(renapFromEnv({ ENABLE_TEST_BYPASS: "true", NODE_ENV: "development" })).toBeNull()
+    expect(renapFromEnv({ NODE_ENV: "production" })).toBeNull()
+  })
+
+  it("with a token → the real client, also with the bypass on; the default base is https", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(body(record())), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+    try {
+      const check = renapFromEnv({ ENABLE_TEST_BYPASS: "true", NODE_ENV: "development", RENAP_TOKEN: "tok" })
+      expect(check).not.toBeNull()
+      expect(await check!(query)).toMatchObject({ result: "MATCH_UNICO" })
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+      expect(String(url).startsWith(`${DEFAULT_RENAP_BASE_URL}/api/infos/search?q=${DPI}`)).toBe(true)
+      expect(DEFAULT_RENAP_BASE_URL.startsWith("https://")).toBe(true)
+      expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok")
+
+      await renapFromEnv({ RENAP_TOKEN: "tok", RENAP_BASE_URL: "http://other.test" })!(query)
+      expect(String((fetchMock.mock.calls[1] as unknown as [string])[0])).toMatch(/^https:\/\/other\.test\//)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
