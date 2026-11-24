@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { cookieJar } from "./setup"
 import { createFakeAirtable } from "./avales-fake-airtable"
 import { generateToken, hashToken } from "@/lib/avales/tokens"
+import { DECLARATION_TEXT } from "@/lib/avales/declaration"
 import type { GuarantorRequestInput } from "@/lib/avales/types"
 import { answerGuarantor, getGuarantorView, getRutaAction, submitGuarantorRequest } from "@/app/avales-actions"
 
@@ -88,6 +89,7 @@ describe("submitGuarantorRequest", () => {
   it("stores the request and is safe to resubmit", async () => {
     const first = await submitGuarantorRequest(input())
     const requestId = fake.rows("requests")[0].id
+    expect(fake.rows("requests")[0].fields.test).toBeUndefined() // not in simulation → real request
     expect(first).toEqual({ ok: true, requestId, expiresAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/), requestedAmount: 1000, reused: false, open: true })
     const second = await submitGuarantorRequest(input())
     expect(second).toEqual({ ...first, reused: true })
@@ -145,7 +147,7 @@ describe("submitGuarantorRequest", () => {
   })
 
   it("a partial failure answers unavailable and the retry completes it", async () => {
-    fake.failOn("PATCH", "guarantors", 429)
+    fake.failOn("PATCH", "guarantors", 503)
     expect(await submitGuarantorRequest(input())).toEqual({ ok: false, code: "unavailable" })
     const retry = await submitGuarantorRequest(input())
     expect(retry).toMatchObject({ ok: true, reused: true, open: true })
@@ -183,10 +185,35 @@ describe("getGuarantorView", () => {
 })
 
 describe("answerGuarantor", () => {
-  it("is a stub until RENAP lands", async () => {
-    expect(await answerGuarantor(generateToken(), "accept", { fullName: "A", identification: "0000000000001", phone: "55550001" })).toEqual({
-      ok: false,
-      code: "not_available",
-    })
+  async function linkForFirstGuarantor() {
+    await submitGuarantorRequest(input())
+    const token = generateToken()
+    fake.rows("guarantors")[0].fields["token-hash"] = hashToken(token)
+    return token
+  }
+  const confirm = { fullName: "Aval Uno", identification: "0000000000001", phone: "55550001", acceptedText: DECLARATION_TEXT }
+
+  it("with the test bypass, accepts through simulated RENAP and logs no PII nor token", async () => {
+    vi.stubEnv("ENABLE_TEST_BYPASS", "true")
+    const token = await linkForFirstGuarantor()
+    expect(await answerGuarantor(token, "accept", confirm)).toEqual({ ok: true, status: "authorized" })
+    expect(fake.rows("guarantors")[0].fields.status).toBe("authorized")
+    expect(fake.rows("requests")[0].fields.test).toBe(true) // created in simulation → test data
+    expect(await answerGuarantor(token, "reject", { fullName: "", identification: "", phone: "" })).toEqual({ ok: false, code: "closed" })
+    expectNoPiiInLogs([token])
+  })
+
+  it("never simulates in production: without RENAP credentials, accept is unavailable", async () => {
+    vi.stubEnv("ENABLE_TEST_BYPASS", "true")
+    vi.stubEnv("NODE_ENV", "production")
+    const token = await linkForFirstGuarantor()
+    expect(await answerGuarantor(token, "accept", confirm)).toEqual({ ok: false, code: "unavailable" })
+    expect(fake.rows("guarantors")[0].fields.status).toBe("pending")
+  })
+
+  it("answers invalid for a malformed token without storage", async () => {
+    vi.stubEnv("AIRTABLE_TOKEN", "")
+    expect(await answerGuarantor("nope", "reject", { fullName: "", identification: "", phone: "" })).toEqual({ ok: false, code: "invalid" })
+    expect(fake.calls).toHaveLength(0)
   })
 })

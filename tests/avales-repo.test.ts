@@ -163,7 +163,7 @@ describe("submit", () => {
 
   it("a retry right after the guarantor write failed completes the request (no ok with missing guarantors)", async () => {
     const { fake, repo } = setup()
-    fake.failOn("PATCH", "guarantors", 429)
+    fake.failOn("PATCH", "guarantors", 503)
     await expect(repo.submit(parsed())).rejects.toThrow(AirtableError)
     expect(fake.rows("requests")).toHaveLength(1)
     expect(fake.rows("guarantors")).toHaveLength(0)
@@ -452,6 +452,18 @@ describe("lib/airtable errors", () => {
     expect(error).toBeInstanceOf(AirtableError)
     expect((error as AirtableError).message).toBe("Airtable GET guarantors failed: 422 INVALID_VALUE_FOR_COLUMN")
     expect((error as AirtableError).message).not.toContain(PII.dpis[0])
+  })
+
+  it("retries a 429 (rate limit) with backoff, then gives up", async () => {
+    const sleep = vi.fn(async (_ms: number) => {})
+    const client = createAirtableClient({ token: "t", baseId: "appTEST0000000000", fetch: fake.fetch, sleep })
+    fake.failOn("GET", "guarantors", 429)
+    fake.failOn("GET", "guarantors", 429)
+    expect(await client.list("guarantors")).toEqual([])
+    expect(sleep.mock.calls.map((c) => c[0])).toEqual([1000, 2000])
+
+    for (let i = 0; i < 3; i++) fake.failOn("PATCH", "guarantors", 429)
+    await expect(client.update("guarantors", [{ id: "rec00000000000099", fields: {} }])).rejects.toThrow("429")
   })
 
   it("a 404 on a list is an error (wrong base or table), not an empty result", async () => {

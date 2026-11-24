@@ -49,10 +49,26 @@ export type GuarantorStatus =
 export interface RequestFields {
   [key: string]: unknown
   authorization?: string
+  phone?: string
+  identification?: string
   "full-name"?: string
+  email?: string
+  company?: string
+  age?: string
+  "marital-status"?: string
+  address?: string
+  "cupo-id"?: string
+  "approved-amount"?: number
   "requested-amount"?: number
+  commission?: number
+  "commission-pct"?: number
   status?: RequestStatus
   "expires-at"?: string
+  "release-code"?: string
+  "release-claim"?: string
+  /** Created in simulation (test bypass). Absent (unchecked) on real requests. */
+  test?: boolean
+  audit?: string
 }
 
 export interface GuarantorFields {
@@ -66,6 +82,16 @@ export interface GuarantorFields {
   relationship?: Relationship
   "token-hash"?: string
   status?: GuarantorStatus
+  "invited-at"?: string
+  "answered-at"?: string
+  "renap-result"?: string
+  "renap-raw"?: string
+  evidence?: string
+  "guarantor-leads"?: string[]
+  /** `<attempt>@<epoch ms>` while an answer is being processed (lib/avales/answer.ts). */
+  "answer-claim"?: string
+  /** Simulation only: the guarantor link of a test request, for local testing from Airtable. */
+  "dev-link"?: string
 }
 
 export interface SubmitOutcome {
@@ -91,7 +117,7 @@ function byCreation(a: AirtableRecord, b: AirtableRecord) {
   return a.createdTime === b.createdTime ? a.id.localeCompare(b.id) : a.createdTime.localeCompare(b.createdTime)
 }
 
-function requestFields(input: ParsedGuarantorRequest, expiresAt: string) {
+function requestFields(input: ParsedGuarantorRequest, expiresAt: string, test: boolean) {
   const a = input.applicant
   return {
     authorization: input.authorization,
@@ -111,7 +137,22 @@ function requestFields(input: ParsedGuarantorRequest, expiresAt: string) {
     status: "pending_guarantors" satisfies RequestStatus,
     "expires-at": expiresAt,
     audit: JSON.stringify(input.audit),
+    ...(test ? { test: true } : {}),
   }
+}
+
+/** Requests created before the `test` field existed that are known to be test data. */
+const LEGACY_TEST_AUTHORIZATIONS = new Set(["AUTH-DOC-2025-EXAMPLE"])
+
+/**
+ * Local and production share one Airtable base. A request is test data when it was created in
+ * simulation (`test` checked) or, for requests older than that field, when its authorization is a
+ * known test one (`TEST-AVALES-*`, `AUTH-DOC-2025-EXAMPLE`). The job in simulation only processes
+ * test requests; outside simulation, only real ones.
+ */
+export function isTestRequest(r: RequestFields): boolean {
+  const authorization = r.authorization ?? ""
+  return r.test === true || authorization.startsWith("TEST-AVALES-") || LEGACY_TEST_AUTHORIZATIONS.has(authorization)
 }
 
 /** Applicant's full name, trimmed and with single spaces: what the guarantor sees. */
@@ -283,7 +324,7 @@ export function createAvalesRepo(deps: AvalesRepoDeps) {
    *   the lookup), the second upsert overwrites the request fields written by the first; guarantors
    *   keep the data of whichever call created each position.
    */
-  async function submit(input: ParsedGuarantorRequest): Promise<SubmitOutcome> {
+  async function submit(input: ParsedGuarantorRequest, options: { test?: boolean } = {}): Promise<SubmitOutcome> {
     const existing = await findRequests(input.authorization)
     if (existing.length > 0) {
       const canonical = canonicalOf(existing)
@@ -299,7 +340,7 @@ export function createAvalesRepo(deps: AvalesRepoDeps) {
     }
 
     const expiresAt = new Date(now().getTime() + EXPIRY_MS).toISOString()
-    const upserted = await airtable.upsert<RequestFields>(TABLES.requests, [requestFields(input, expiresAt)], ["authorization"])
+    const upserted = await airtable.upsert<RequestFields>(TABLES.requests, [requestFields(input, expiresAt, options.test ?? false)], ["authorization"])
     const own = upserted.records[0]
     if (!own) throw new Error("Airtable upsert returned no record")
 
@@ -324,17 +365,29 @@ export function createAvalesRepo(deps: AvalesRepoDeps) {
 
   /** Resolves /aval/<token>. Unknown or malformed tokens give `invalid` without touching storage. */
   async function view(token: string): Promise<GuarantorView> {
-    if (!isWellFormedToken(token)) return { screen: "invalid" }
+    const found = await findByToken(token)
+    if (!found) return { screen: "invalid" }
+    return resolveView(found.guarantor, found.request, now())
+  }
+
+  /** The guarantor a link token belongs to and its request, or null for an unknown/malformed token. */
+  async function findByToken(token: string) {
+    const guarantor = await findGuarantorByToken(token)
+    const requestId = guarantor?.fields.request?.[0]
+    if (!guarantor || !requestId) return null
+    const request = await airtable.get<RequestFields>(TABLES.requests, requestId)
+    if (!request) return null
+    return { guarantor, request }
+  }
+
+  /** Only the guarantor a link token belongs to (one Airtable call), or null. */
+  async function findGuarantorByToken(token: string) {
+    if (!isWellFormedToken(token)) return null
     const matches = await airtable.list<GuarantorFields>(TABLES.guarantors, {
       filterByFormula: `{token-hash} = ${formulaString(hashToken(token))}`,
       maxRecords: 1,
     })
-    const guarantor = matches[0]
-    const requestId = guarantor?.fields.request?.[0]
-    if (!guarantor || !requestId) return { screen: "invalid" }
-    const request = await airtable.get<RequestFields>(TABLES.requests, requestId)
-    if (!request) return { screen: "invalid" }
-    return resolveView(guarantor, request, now())
+    return matches[0] ?? null
   }
 
   /**
@@ -354,7 +407,7 @@ export function createAvalesRepo(deps: AvalesRepoDeps) {
     return token
   }
 
-  return { submit, view, issueGuarantorToken }
+  return { submit, view, findByToken, findGuarantorByToken, issueGuarantorToken, guarantorsOf, isOpen }
 }
 
 export type AvalesRepo = ReturnType<typeof createAvalesRepo>
