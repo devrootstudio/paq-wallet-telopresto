@@ -224,6 +224,50 @@ describe("guarantorRequestSchema (server revalidation)", () => {
   })
 })
 
+describe('company "Otra" (typed by hand)', () => {
+  const withCompany = (applicant: Partial<GuarantorRequestInput["applicant"]>) => {
+    const base = validRequest()
+    return { ...base, applicant: { ...base.applicant, ...applicant } }
+  }
+  const other = { companyOther: true, company: "Empresa Nueva", companyPhone: "2222 3333", companyAddress: "  6a avenida 1-23, zona 1, Guatemala  " }
+
+  it("valid: name, phone (normalized) and address (trimmed) come out", () => {
+    const out = guarantorRequestSchema.parse(withCompany(other))
+    expect(out.applicant).toMatchObject({
+      companyOther: true,
+      company: "Empresa Nueva",
+      companyPhone: "22223333",
+      companyAddress: "6a avenida 1-23, zona 1, Guatemala",
+    })
+  })
+
+  it("each missing or invalid field gets its own message", () => {
+    expect(errorsOf(withCompany({ ...other, company: "  " }))).toEqual({ "applicant.company": "Escribe el nombre de la empresa" })
+    expect(errorsOf(withCompany({ ...other, companyPhone: "123" }))).toEqual({
+      "applicant.companyPhone": "El teléfono de la empresa debe tener 8 dígitos",
+    })
+    expect(errorsOf(withCompany({ ...other, companyAddress: "zona 1" }))).toEqual({
+      "applicant.companyAddress": "Ingresa la dirección completa de la empresa",
+    })
+    expect(errorsOf(withCompany({ ...other, companyAddress: "x".repeat(301) }))).toEqual({
+      "applicant.companyAddress": "Ingresa la dirección completa de la empresa",
+    })
+    expect(errorsOf(withCompany({ companyOther: true, company: "", companyPhone: undefined, companyAddress: undefined }))).toEqual({
+      "applicant.company": "Escribe el nombre de la empresa",
+      "applicant.companyPhone": "El teléfono de la empresa debe tener 8 dígitos",
+      "applicant.companyAddress": "Ingresa la dirección completa de la empresa",
+    })
+  })
+
+  it("without \"Otra\" (false or absent) phone and address are ignored and come out empty, as today", () => {
+    for (const companyOther of [false, undefined]) {
+      const out = guarantorRequestSchema.parse(withCompany({ companyOther, companyPhone: "x", companyAddress: "y" }))
+      expect(out.applicant).toMatchObject({ companyOther: false, company: "Empresa Ficticia", companyPhone: "", companyAddress: "" })
+    }
+    expect(guarantorRequestSchema.safeParse(validRequest()).success).toBe(true)
+  })
+})
+
 describe("guarantorAnswerSchema", () => {
   it("validates what the guarantor confirms", () => {
     expect(guarantorAnswerSchema.safeParse({ fullName: "Aval Uno", identification: "0000000000001", phone: "55550001" }).success).toBe(true)
