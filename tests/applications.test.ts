@@ -118,6 +118,12 @@ describe("recordApplication: what each step writes", () => {
     })
   })
 
+  it("a listed company stores no phone or address, even if the form left some behind", async () => {
+    const listed = { ...step1, empresaOtra: false, empresaTelefono: "leftover", empresaDireccion: "leftover" }
+    await recordApplication(AUTH, { step: "paso1", data: listed, client }, deps())
+    expect(rows()[0].fields).toMatchObject({ company: "Empresa de la Lista", "company-other": false, "company-phone": "", "company-address": "" })
+  })
+
   it("Step 1 failure (client create/edit): step error with last-error-step paso1 and the code", async () => {
     await recordApplication(AUTH, { step: "paso1", data: step1, client: null, error: { message: "DPI inválido", code: 9 } }, deps())
     expect(rows()[0].fields).toMatchObject({ step: "error", "last-error-step": "paso1", "last-error": "DPI inválido (código 9)", attempts: 1 })
