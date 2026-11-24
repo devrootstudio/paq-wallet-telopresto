@@ -1,4 +1,4 @@
-import { AirtableError, airtableFromEnv, formulaString, type AirtableClient, type Fields } from "@/lib/airtable"
+import { AirtableError, airtableFromEnv, formulaString, type AirtableClient, type AirtableRecord, type Fields } from "@/lib/airtable"
 import type { QueryClientResponse } from "@/lib/soap-client"
 
 /**
@@ -7,14 +7,20 @@ import type { QueryClientResponse } from "@/lib/soap-client"
  * created a new record on every Step 1 retry. Server-side only.
  *
  * Every write is an upsert on `authorization` (Airtable `performUpsert`, no typecast), so a retry
- * updates the same record. Values a field cannot hold (an unknown select option, a malformed
- * date or email) are left out instead of failing the whole write.
+ * updates the same record. If old duplicates already share the authorization, the newest one is
+ * updated by id. Values a field cannot hold (an unknown select option, a malformed or impossible
+ * date, a malformed email) are left out instead of failing the whole write.
  *
- * Never throws and never blocks the flow: a failed write is logged (step, status and Airtable
- * error type only; never personal data or the token) and retried once on 5xx / network errors.
+ * Callers await it (so the Step 1 record exists before the next event), so it is time-boxed:
+ * at most WRITE_BUDGET_MS in total, no retries (not even on a 429). It never throws: a failed write
+ * is logged with the step, the status, the Airtable error type and a short authorization prefix
+ * (never personal data or the token), and reported by returning false.
  */
 
 export const APPLICATIONS_TABLE = "applications"
+
+/** Total time one recordApplication call may take (all its Airtable requests together). */
+export const WRITE_BUDGET_MS = 3000
 
 export type ApplicationStep = "paso1" | "otp-enviado" | "otp-validado" | "cupo-validado" | "desembolsado" | "error"
 export type ApplicationErrorStep = "paso1" | "otp" | "cupo" | "desembolso"
@@ -53,21 +59,21 @@ export type ApplicationPatch =
   | { step: "cupo-validado"; approvedAmount?: number; cupoId?: string; otpValidated?: boolean }
   /** Disbursement done. */
   | { step: "desembolsado"; requestedAmount?: number; commission?: number; code: string | number; message?: string }
-  /** A step failed. `otpValidated` when the OTP had been validated before the failure (Step 2). */
-  | {
-      step: "error"
-      errorStep: ApplicationErrorStep
-      error: StepError
-      otpValidated?: boolean
-      disbursement?: { requestedAmount?: number; commission?: number }
-    }
+  /**
+   * A step failed: only step, last-error-step and last-error are written, so an error never
+   * overwrites data of an earlier success (e.g. the disbursement code). `otpValidated` when the
+   * OTP had been validated before the failure (Step 2).
+   */
+  | { step: "error"; errorStep: ApplicationErrorStep; error: StepError; otpValidated?: boolean }
 
 export interface RecordOptions {
   /** ENABLE_TEST_BYPASS: mark the record as test data. */
   test?: boolean
-  /** Defaults to the client from AIRTABLE_TOKEN / AIRTABLE_BASE_ID. */
+  /** Defaults to a client from AIRTABLE_TOKEN / AIRTABLE_BASE_ID limited to WRITE_BUDGET_MS. */
   airtable?: AirtableClient | null
   now?: () => Date
+  /** Total time budget for the default client. Default WRITE_BUDGET_MS. */
+  budgetMs?: number
 }
 
 // Select options that exist in the table (writing anything else would fail the whole write).
@@ -95,11 +101,17 @@ export function normalizeStartDate(date: string): string {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : date
 }
 
-const text = (v: unknown) => (v === undefined || v === null ? undefined : String(v))
-const isoDate = (v: unknown) => {
-  const d = normalizeStartDate(text(v) ?? "")
-  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : undefined
+/** yyyy-mm-dd of a date that exists in the calendar (31-02 does not), or undefined. */
+export function validIsoDate(value: unknown): string | undefined {
+  const d = normalizeStartDate(value === undefined || value === null ? "" : String(value))
+  const m = d.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return undefined
+  const [y, mo, da] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const date = new Date(Date.UTC(y, mo - 1, da))
+  return date.getUTCFullYear() === y && date.getUTCMonth() === mo - 1 && date.getUTCDate() === da ? d : undefined
 }
+
+const text = (v: unknown) => (v === undefined || v === null ? undefined : String(v))
 const email = (v: unknown) => {
   const s = (text(v) ?? "").trim()
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) ? s : undefined
@@ -130,7 +142,7 @@ function step1Fields(data: Step1Data, client: QueryClientResponse | null): Recor
     phone: digits(data.phone),
     email: email(data.email),
     nit: data.nit,
-    "start-date": isoDate(data.startDate),
+    "start-date": validIsoDate(data.startDate),
     salary: amount(data.salary),
     frequency: option(normalizePaymentFrequency(data.paymentFrequency), FREQUENCY_OPTIONS),
     company: data.empresa ?? "",
@@ -152,7 +164,7 @@ function step1Fields(data: Step1Data, client: QueryClientResponse | null): Recor
           "ws-phone": digits(c?.phone),
           "ws-email": email(c?.email),
           "ws-nit": text(c?.nit),
-          "ws-start-date": isoDate(c?.startDate),
+          "ws-start-date": validIsoDate(c?.startDate),
           "ws-salary": amount(c?.monthlySalary),
           "ws-frequency": option(c?.paymentFrequency, WS_FREQUENCY_OPTIONS),
           "ws-number-of-dispersions": text(c?.numberOfDispersions),
@@ -197,14 +209,6 @@ export function patchFields(patch: ApplicationPatch, nowIso: string): Record<str
         "last-error-step": patch.errorStep,
         "last-error": errorText(patch.error),
         ...(patch.otpValidated ? { "otp-validated-at": nowIso } : {}),
-        ...(patch.errorStep === "desembolso"
-          ? {
-              "disbursement-code": text(patch.error.code),
-              "disbursement-message": patch.error.message,
-              "requested-amount": amount(patch.disbursement?.requestedAmount),
-              commission: amount(patch.disbursement?.commission),
-            }
-          : {}),
       }
   }
 }
@@ -214,51 +218,74 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.name : "unknown"
 }
 
-const retryable = (error: unknown) => error instanceof AirtableError && (error.status === 0 || error.status >= 500)
+const isMultipleMatches = (error: unknown) => error instanceof AirtableError && error.status === 422 && /MULTIPLE/i.test(error.type)
+
+const newest = <F extends Fields>(records: AirtableRecord<F>[]) =>
+  [...records].sort((a, b) => (a.createdTime === b.createdTime ? b.id.localeCompare(a.id) : b.createdTime.localeCompare(a.createdTime)))[0]
 
 /**
- * Records one event of the request `authorization` in `applications` (upsert on authorization).
- * Step 1 also increments `attempts`. Never throws.
+ * Records one event of the request `authorization` in `applications` (one record per
+ * authorization). Step 1 also increments `attempts`. Returns true when written. Never throws.
  */
 export async function recordApplication(
   authorization: string | undefined,
   patch: ApplicationPatch,
   opts: RecordOptions = {},
-): Promise<void> {
+): Promise<boolean> {
   if (!authorization || !AUTHORIZATION_PATTERN.test(authorization)) {
     console.warn(`[applications] ${patch.step}: missing or malformed authorization; not recorded`)
-    return
+    return false
   }
-  const airtable = opts.airtable === undefined ? airtableFromEnv() : opts.airtable
+  // Short prefix to identify the request in logs (the authorization is an opaque random id).
+  const ref = `${authorization.slice(0, 6)}…`
+  const budgetMs = opts.budgetMs ?? WRITE_BUDGET_MS
+  const airtable =
+    opts.airtable === undefined
+      ? airtableFromEnv({ timeoutMs: budgetMs, rateLimitRetries: 0, signal: AbortSignal.timeout(budgetMs) })
+      : opts.airtable
   if (!airtable) {
-    console.warn(`[applications] ${patch.step}: storage not configured; not recorded`)
-    return
+    console.warn(`[applications] ${patch.step} ${ref}: storage not configured; not recorded`)
+    return false
   }
   const nowIso = (opts.now ?? (() => new Date()))().toISOString()
+  const fields: Record<string, unknown> = {
+    authorization,
+    ...patchFields(patch, nowIso),
+    "updated-at": nowIso,
+    ...(opts.test ? { test: true } : {}),
+  }
+  const byAuthorization = () =>
+    airtable.list<{ attempts?: number }>(APPLICATIONS_TABLE, { filterByFormula: `{authorization} = ${formulaString(authorization)}` })
+  const updateNewest = async (records: AirtableRecord<{ attempts?: number }>[]) => {
+    console.warn(`[applications] ${patch.step} ${ref}: ${records.length} records share this authorization; updating the newest`)
+    await airtable.update(APPLICATIONS_TABLE, [{ id: newest(records).id, fields: compact(fields) }])
+  }
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const fields: Record<string, unknown> = {
-        authorization,
-        ...patchFields(patch, nowIso),
-        "updated-at": nowIso,
-        ...(opts.test ? { test: true } : {}),
+  try {
+    if (patch.step === "paso1") {
+      // Read attempts first (not atomic, which is enough: the Step 1 button is disabled while the
+      // call runs). If the read fails, write Step 1 anyway, without attempts.
+      let existing: AirtableRecord<{ attempts?: number }>[] | null = null
+      try {
+        existing = await byAuthorization()
+      } catch (error) {
+        console.error(`[applications] ${patch.step} ${ref}: attempts read failed (${describe(error)}); writing without attempts`)
       }
-      if (patch.step === "paso1") {
-        // Not atomic, which is enough: the Step 1 button is disabled while the call runs.
-        const [current] = await airtable.list<{ attempts?: number }>(APPLICATIONS_TABLE, {
-          filterByFormula: `{authorization} = ${formulaString(authorization)}`,
-          maxRecords: 1,
-          fields: ["attempts"],
-        })
-        fields.attempts = (current?.fields.attempts ?? 0) + 1
+      if (existing) fields.attempts = ((existing.length > 0 ? newest(existing).fields.attempts : 0) ?? 0) + 1
+      if (existing && existing.length > 1) {
+        await updateNewest(existing)
+        return true
       }
-      await airtable.upsert(APPLICATIONS_TABLE, [compact(fields)], ["authorization"])
-      return
-    } catch (error) {
-      const again = attempt === 1 && retryable(error)
-      console.error(`[applications] ${patch.step} write failed${again ? ", retrying" : ""}: ${describe(error)}`)
-      if (!again) return
     }
+    try {
+      await airtable.upsert(APPLICATIONS_TABLE, [compact(fields)], ["authorization"])
+    } catch (error) {
+      if (!isMultipleMatches(error)) throw error
+      await updateNewest(await byAuthorization())
+    }
+    return true
+  } catch (error) {
+    console.error(`[applications] ${patch.step} ${ref} write failed: ${describe(error)}`)
+    return false
   }
 }

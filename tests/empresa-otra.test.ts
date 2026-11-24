@@ -122,7 +122,7 @@ describe("Step 1 form", () => {
   })
 })
 
-describe("Step 1 submit and Make", () => {
+describe("Step 1 submit", () => {
   const store = () => ({
     nextStepAsync: vi.fn(), setLoading: vi.fn(), setErrorStep: vi.fn(), updateFormData: vi.fn(), goToStepAsync: vi.fn(),
     formData: real().formData,

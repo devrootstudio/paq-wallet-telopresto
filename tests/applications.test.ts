@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { createAirtableClient } from "@/lib/airtable"
-import { APPLICATIONS_TABLE, normalizePaymentFrequency, normalizeStartDate, recordApplication, type Step1Data } from "@/lib/applications"
+import { APPLICATIONS_TABLE, normalizePaymentFrequency, normalizeStartDate, recordApplication, validIsoDate, type Step1Data } from "@/lib/applications"
 import type { QueryClientResponse } from "@/lib/soap-client"
 import { createFakeAirtable } from "./avales-fake-airtable"
 
@@ -169,19 +169,27 @@ describe("recordApplication: what each step writes", () => {
     await recordApplication(AUTH, { step: "error", errorStep: "cupo", otpValidated: true, error: { message: "Sin cupo" } }, deps())
     expect(rows()[0].fields).toMatchObject({ "last-error-step": "cupo", "last-error": "Sin cupo", "otp-validated-at": NOW.toISOString() })
 
-    await recordApplication(
-      AUTH,
-      { step: "error", errorStep: "desembolso", error: { message: "Rechazado", code: "12" }, disbursement: { requestedAmount: 1000, commission: 84 } },
-      deps(),
-    )
+    await recordApplication(AUTH, { step: "error", errorStep: "desembolso", error: { message: "Rechazado", code: "12" } }, deps())
+    expect(rows()[0].fields).toMatchObject({ step: "error", "last-error-step": "desembolso", "last-error": "Rechazado (código 12)" })
+    expect(rows()[0].fields["disbursement-code"]).toBeUndefined()
+  })
+
+  it("an error never overwrites data of an earlier success (e.g. the disbursement code)", async () => {
+    await recordApplication(AUTH, { step: "desembolsado", requestedAmount: 1000, commission: 84, code: "0", message: "Disbursed" }, deps())
+    await recordApplication(AUTH, { step: "error", errorStep: "desembolso", error: { message: "Timeout", code: "99" } }, deps())
+    const errorWrite = JSON.parse(upserts()[1].body!).records[0].fields
+    expect(Object.keys(errorWrite).sort()).toEqual(["authorization", "last-error", "last-error-step", "step", "updated-at"])
     expect(rows()[0].fields).toMatchObject({
-      "last-error-step": "desembolso",
-      "last-error": "Rechazado (código 12)",
-      "disbursement-code": "12",
-      "disbursement-message": "Rechazado",
+      "disbursement-code": "0",
+      "disbursement-message": "Disbursed",
       "requested-amount": 1000,
       commission: 84,
+      "last-error": "Timeout (código 99)",
     })
+  })
+
+  it("returns true when written", async () => {
+    expect(await recordApplication(AUTH, { step: "otp-enviado" }, deps())).toBe(true)
   })
 
   it("with the test bypass every write carries test = true", async () => {
@@ -202,6 +210,14 @@ describe("recordApplication: values a field cannot hold are left out", () => {
     expect(f).toMatchObject({ step: "paso1", name: "Cliente Ficticio Prueba" })
   })
 
+  it("impossible dates are left out (31-02), real ones kept", async () => {
+    await recordApplication(AUTH, { step: "paso1", data: { ...step1, startDate: "31-02-2024" }, client }, deps())
+    expect(rows()[0].fields["start-date"]).toBeUndefined()
+    expect(validIsoDate("29-02-2024")).toBe("2024-02-29")
+    expect(validIsoDate("29-02-2023")).toBeUndefined()
+    expect(validIsoDate("2024-04-31")).toBeUndefined()
+  })
+
   it("format helpers match the old Make mapping", () => {
     expect(normalizeStartDate("01-02-2024")).toBe("2024-02-01")
     expect(normalizeStartDate("2024-02-01")).toBe("2024-02-01")
@@ -209,35 +225,80 @@ describe("recordApplication: values a field cannot hold are left out", () => {
   })
 })
 
-describe("recordApplication never throws nor blocks", () => {
-  it("retries once on a 5xx, then gives up quietly; logs carry no personal data", async () => {
+describe("old duplicates sharing the authorization", () => {
+  const seedDuplicates = () => {
+    const older = fake.seed(APPLICATIONS_TABLE, { authorization: AUTH, attempts: 1 }, "2026-11-01T10:00:00.000Z")
+    const newer = fake.seed(APPLICATIONS_TABLE, { authorization: AUTH, attempts: 3 }, "2026-11-01T10:00:55.000Z")
+    return { older, newer }
+  }
+
+  it("a later step updates the newest record by id (the upsert's multiple-match error is handled)", async () => {
+    const warns: string[] = []
+    vi.spyOn(console, "warn").mockImplementation((...a: unknown[]) => void warns.push(a.join(" ")))
+    const { older, newer } = seedDuplicates()
+    expect(await recordApplication(AUTH, { step: "otp-enviado" }, deps())).toBe(true)
+    expect(newer.fields.step).toBe("otp-enviado")
+    expect(older.fields.step).toBeUndefined()
+    expect(rows()).toHaveLength(2) // nothing created, nothing deleted
+    expect(warns.join("\n")).toContain(`[applications] otp-enviado ${AUTH.slice(0, 6)}…: 2 records share this authorization`)
+    expect(warns.join("\n")).not.toContain(AUTH)
+  })
+
+  it("Step 1 counts attempts from the newest record and updates it", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const { newer } = seedDuplicates()
+    await recordApplication(AUTH, { step: "paso1", data: step1, client }, deps())
+    expect(newer.fields).toMatchObject({ attempts: 4, step: "paso1", name: "Cliente Ficticio Prueba" })
+    expect(upserts()).toHaveLength(0)
+  })
+})
+
+describe("recordApplication never throws, never retries, and reports failure", () => {
+  it("a failed write is not retried: returns false; logs carry no personal data", async () => {
     const logs: string[] = []
     vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void logs.push(a.join(" ")))
     fake.failOn("PATCH", APPLICATIONS_TABLE, 500)
-    await recordApplication(AUTH, { step: "otp-enviado" }, deps())
-    expect(rows()).toHaveLength(1) // the retry succeeded
-
-    fake.failOn("PATCH", APPLICATIONS_TABLE, 500)
-    fake.failOn("PATCH", APPLICATIONS_TABLE, 500)
-    await expect(recordApplication(AUTH, { step: "paso1", data: step1, client }, deps())).resolves.toBeUndefined()
+    expect(await recordApplication(AUTH, { step: "paso1", data: step1, client }, deps())).toBe(false)
+    expect(upserts()).toHaveLength(1)
+    expect(rows()).toHaveLength(0)
     const all = logs.join("\n")
-    expect(all).toContain("[applications] paso1 write failed: 500")
+    expect(all).toContain(`[applications] paso1 ${AUTH.slice(0, 6)}… write failed: 500`)
     for (const pii of ["3000000000101", "55550101", "Cliente Ficticio", "cliente@example.com", AUTH]) expect(all).not.toContain(pii)
   })
 
-  it("a 4xx is not retried", async () => {
+  it("if reading attempts fails, Step 1 is still written (without attempts)", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
-    fake.failOn("PATCH", APPLICATIONS_TABLE, 422)
-    await recordApplication(AUTH, { step: "otp-enviado" }, deps())
-    expect(upserts()).toHaveLength(1)
-    expect(rows()).toHaveLength(0)
+    fake.failOn("GET", APPLICATIONS_TABLE, 503)
+    expect(await recordApplication(AUTH, { step: "paso1", data: step1, client }, deps())).toBe(true)
+    expect(rows()[0].fields).toMatchObject({ step: "paso1", name: "Cliente Ficticio Prueba" })
+    expect(rows()[0].fields.attempts).toBeUndefined()
   })
 
-  it("missing or malformed authorization, or no storage configured: nothing is written", async () => {
+  it("the default client is time-boxed: a hanging Airtable ends in about the budget, with false", async () => {
+    vi.stubEnv("AIRTABLE_TOKEN", "test-airtable-token")
+    vi.stubEnv("AIRTABLE_BASE_ID", "appTEST0000000000")
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    // Never answers; like the real fetch, rejects when the signal aborts (or already has).
+    vi.stubGlobal("fetch", ((_url: string, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        if (init?.signal?.aborted) return reject(init.signal.reason)
+        init?.signal?.addEventListener("abort", () => reject(init.signal!.reason))
+      })) as typeof fetch)
+    try {
+      const started = Date.now()
+      expect(await recordApplication(AUTH, { step: "paso1", data: step1, client }, { budgetMs: 150 })).toBe(false)
+      expect(Date.now() - started).toBeLessThan(1500)
+    } finally {
+      vi.unstubAllGlobals()
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("missing or malformed authorization, or no storage configured: nothing is written, false", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {})
-    await recordApplication(undefined, { step: "otp-enviado" }, deps())
-    await recordApplication("x' OR 1=1", { step: "otp-enviado" }, deps())
+    expect(await recordApplication(undefined, { step: "otp-enviado" }, deps())).toBe(false)
+    expect(await recordApplication("x' OR 1=1", { step: "otp-enviado" }, deps())).toBe(false)
     expect(fake.calls).toHaveLength(0)
-    await expect(recordApplication(AUTH, { step: "otp-enviado" }, { airtable: null })).resolves.toBeUndefined()
+    expect(await recordApplication(AUTH, { step: "otp-enviado" }, { airtable: null })).toBe(false)
   })
 })

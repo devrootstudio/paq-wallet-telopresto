@@ -348,9 +348,9 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
       console.log("🧪 TEST MODE: Bypass activated for test phone number")
       console.log(`   Phone: ${cleanPhone}`)
       console.log("   Skipping client validation and OTP sending")
-      console.log("   Sending mock data to webhook")
+      console.log("   Recording mock client data in applications")
 
-      // Send mock data to webhook
+      // Mock client response, recorded in applications
       const mockClientResponse: QueryClientResponse = {
         returnCode: 0,
         message: "TEST MODE: Mock client validation",
@@ -470,7 +470,7 @@ export async function submitStep1Form(data: Step1FormData): Promise<ServerAction
         console.log(`   Client ID: ${createEditResponse.idCliente || "N/A"}`)
       }
 
-      // Create a mock QueryClientResponse for webhook compatibility
+      // Mock QueryClientResponse for the applications record (ws-* columns)
       const mockClientResponse: QueryClientResponse = {
         returnCode: 0,
         message: createEditResponse.message,
@@ -1133,7 +1133,6 @@ export async function submitStep3Form(data: Step3FormData): Promise<ServerAction
           step: "error",
           errorStep: "desembolso",
           error: { message: release.error, code: release.returnCode },
-          disbursement: { requestedAmount: data.monto, commission: data.comision },
         },
         { test: ENABLE_TEST_BYPASS },
       )
@@ -1173,7 +1172,6 @@ export async function submitStep3Form(data: Step3FormData): Promise<ServerAction
         step: "error",
         errorStep: "desembolso",
         error: { message: error instanceof Error ? error.message : "Unknown error processing disbursement" },
-        disbursement: { requestedAmount: data.monto, commission: data.comision },
       },
       { test: ENABLE_TEST_BYPASS },
     )

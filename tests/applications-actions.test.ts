@@ -98,6 +98,40 @@ describe("server actions write one applications record per authorization", () =>
     expect(record()[0].fields).toMatchObject({ step: "error", "last-error-step": "otp", "last-error": "Número sin servicio (código 5)" })
   })
 
+  it("code 24 (terms already accepted): cupo-validado from Step 1, without otp-validated-at", async () => {
+    const { submitStep1Form } = await import("@/app/actions")
+    m(soap.sendTokenTyc).mockResolvedValue({ returnCode: 24 })
+    m(soap.validateCupo).mockResolvedValue({ returnCode: 0, cupoAutorizado: 2800, idSolicitud: "SOL-24" })
+    expect((await submitStep1Form(step1)).skipStep2).toBe(true)
+    expect(record()[0].fields).toMatchObject({ step: "cupo-validado", "approved-amount": 2800, "cupo-id": "SOL-24" })
+    expect(record()[0].fields["otp-validated-at"]).toBeUndefined()
+  })
+
+  it("Step 2 errors: a wrong OTP is error/otp; a cupo rejection is error/cupo with otp-validated-at", async () => {
+    const { submitStep1Form, submitStep2Form } = await import("@/app/actions")
+    m(soap.sendTokenTyc).mockResolvedValue({ returnCode: 0 })
+    await submitStep1Form(step1)
+    m(soap.validateTokenTyc).mockResolvedValue({ returnCode: 26, message: "Token incorrecto" })
+    expect((await submitStep2Form({ phone: step1.phone, token: "ZZZ999", autorizacion: AUTH })).success).toBe(false)
+    expect(record()[0].fields).toMatchObject({ step: "error", "last-error-step": "otp", "last-error": "Token incorrecto (código 26)" })
+
+    m(soap.validateTokenTyc).mockResolvedValue({ returnCode: 0 })
+    m(soap.validateCupo).mockResolvedValue({ returnCode: 7, message: "Sin cupo disponible" })
+    expect((await submitStep2Form({ phone: step1.phone, token: "ABC123", autorizacion: AUTH })).success).toBe(false)
+    expect(record()[0].fields).toMatchObject({ step: "error", "last-error-step": "cupo", "last-error": "Sin cupo disponible (código 7)" })
+    expect(record()[0].fields["otp-validated-at"]).toBeTruthy()
+    expect(record()).toHaveLength(1)
+  })
+
+  it("Step 3 failure: error/desembolso with the code, without touching the disbursement fields", async () => {
+    const { submitStep3Form } = await import("@/app/actions")
+    m(soap.executeDisbursement).mockResolvedValue({ returnCode: 12, message: "Rechazado por el banco" })
+    const r = await submitStep3Form({ phone: step1.phone, idSolicitud: "SOL-9", monto: 1000, comision: 84, autorizacion: AUTH })
+    expect(r).toMatchObject({ success: false, errorType: "disbursement" })
+    expect(record()[0].fields).toMatchObject({ step: "error", "last-error-step": "desembolso", "last-error": "Rechazado por el banco (código 12)" })
+    expect(record()[0].fields["disbursement-code"]).toBeUndefined()
+  })
+
   it("an Airtable outage does not change the action's response", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
     const { submitStep1Form } = await import("@/app/actions")
@@ -112,11 +146,14 @@ describe("with the test bypass", () => {
   it("every write is marked test = true", async () => {
     vi.resetModules()
     vi.stubEnv("ENABLE_TEST_BYPASS", "true")
-    const { submitStep1Form, submitStep2Form } = await import("@/app/actions")
+    const { submitStep1Form, submitStep2Form, submitStep3Form } = await import("@/app/actions")
     expect((await submitStep1Form(step1)).success).toBe(true)
     expect((await submitStep2Form({ phone: step1.phone, token: "222222", autorizacion: AUTH })).success).toBe(true)
     expect(record()).toHaveLength(1)
     expect(record()[0].fields).toMatchObject({ test: true, step: "cupo-validado", "ws-status": "ACTIVE" })
+    // Step 3 with the bypass: disbursement simulated, recorded as desembolsado (code 0).
+    expect((await submitStep3Form({ phone: step1.phone, idSolicitud: "TEST-001", monto: 1000, comision: 84, autorizacion: AUTH })).success).toBe(true)
+    expect(record()[0].fields).toMatchObject({ test: true, step: "desembolsado", "disbursement-code": "0", "requested-amount": 1000, commission: 84 })
     const upserts = fake.calls.filter((c) => c.method === "PATCH")
     expect(upserts.length).toBeGreaterThanOrEqual(2)
     for (const u of upserts) expect(JSON.parse(u.body!).records[0].fields.test).toBe(true)

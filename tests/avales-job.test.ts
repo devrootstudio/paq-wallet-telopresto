@@ -67,7 +67,7 @@ async function world(mode: "test" | "real" = "test") {
   }
   const disburse = vi.fn(async (): Promise<DisburseOutcome> => ({ success: true, returnCode: "0", message: "ok", contractUrl: "https://pdf.example/c.pdf" }))
   // The applications record of each release (spied: no real Airtable).
-  const applications = vi.fn(async () => {})
+  const applications = vi.fn(async (): Promise<boolean> => true)
   const deps = (extra: Partial<JobDeps> = {}): JobDeps => ({
     airtable,
     whatsapp,
@@ -417,9 +417,43 @@ describe("steps 2–5: quorum and release", () => {
       await w.run()
       expect(w.applications).toHaveBeenCalledWith(
         "SIM-job-0001",
-        { step: "error", errorStep: "desembolso", error: { message: "Rejected", code: "12" }, disbursement: { requestedAmount: 1000, commission: 75 } },
+        { step: "error", errorStep: "desembolso", error: { message: "Rejected", code: "12" } },
         { test: true },
       )
+    })
+
+    it("a valida_cupo failure (error or rejection) records error/cupo, not desembolso", async () => {
+      const w = await world("test")
+      await w.airtable.update("requests", [{ id: w.requestId, fields: { status: "quorum" } }])
+      await w.run({ cupo: async () => ({ ok: false, cupoAutorizado: 0, idSolicitud: "", message: "Sin cupo" }) })
+      expect(appCalls(w).map((c) => c[1])).toEqual([{ step: "error", errorStep: "cupo", error: { message: "valida_cupo: Sin cupo" } }])
+
+      const w2 = await world("test")
+      await w2.airtable.update("requests", [{ id: w2.requestId, fields: { status: "quorum" } }])
+      await w2.run({ cupo: async () => Promise.reject(new Error("SOAP down")) })
+      expect(appCalls(w2).map((c) => (c[1] as { errorStep?: string }).errorStep)).toEqual(["cupo"])
+    })
+
+    it("desembolsado is recorded after the request write (which guards against a second release)", async () => {
+      const w = await world("test")
+      await w.airtable.update("requests", [{ id: w.requestId, fields: { status: "quorum" } }])
+      let statusSeen: unknown
+      w.applications.mockImplementation(async () => {
+        statusSeen = w.reqRow().fields.status
+        return true
+      })
+      await w.run()
+      expect(statusSeen).toBe("disbursed")
+    })
+
+    it("an unrecorded application (false) is noted in the report, the run goes on", async () => {
+      const w = await world("test")
+      await w.airtable.update("requests", [{ id: w.requestId, fields: { status: "quorum" } }])
+      w.applications.mockResolvedValue(false)
+      vi.spyOn(console, "error").mockImplementation(() => {})
+      const report = await w.run()
+      expect(report.released).toEqual([{ requestId: w.requestId, status: "disbursed", returnCode: "0" }])
+      expect(report.errors).toContainEqual(expect.objectContaining({ step: "application", id: w.requestId }))
     })
 
     it("cupo below the amount records error/cupo", async () => {

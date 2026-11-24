@@ -403,17 +403,18 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
     const amounts = { requestedAmount: r["requested-amount"], commission: r.commission }
     const noteApplication = async (patch: ApplicationPatch) => {
       try {
-        await applications(r.authorization, patch, { test: isTestRequest(r) })
+        const written = await applications(r.authorization, patch, { test: isTestRequest(r) })
+        if (!written) fail("application", id, new Error(`${patch.step} not recorded in applications`))
       } catch (error) {
         fail("application", id, error)
       }
     }
 
-    const markFailed = async (message: string, returnCode?: string) => {
+    const markFailed = async (message: string, returnCode?: string, errorStep: "cupo" | "desembolso" = "desembolso") => {
       await airtable.update(TABLES.requests, [
         { id, fields: { status: "release_failed" satisfies RequestStatus, "release-message": message, ...(returnCode ? { "release-code": returnCode } : {}) } },
       ])
-      await noteApplication({ step: "error", errorStep: "desembolso", error: { message, code: returnCode }, disbursement: amounts })
+      await noteApplication({ step: "error", errorStep, error: { message, code: returnCode } })
       return { requestId: id, status: "release_failed" as const, ...(returnCode ? { returnCode } : {}) }
     }
 
@@ -422,9 +423,9 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
     try {
       check = await cupo(claimed)
     } catch (error) {
-      return await markFailed(`valida_cupo: ${describe(error)}`)
+      return await markFailed(`valida_cupo: ${describe(error)}`, undefined, "cupo")
     }
-    if (!check.ok) return await markFailed(`valida_cupo: ${check.message}`)
+    if (!check.ok) return await markFailed(`valida_cupo: ${check.message}`, undefined, "cupo")
     if (check.cupoAutorizado < (claimed.fields["requested-amount"] ?? 0)) {
       await airtable.update(TABLES.requests, [{ id, fields: { status: "not_approved" satisfies RequestStatus, "release-message": "Cupo below the requested amount" } }])
       await noteApplication({ step: "error", errorStep: "cupo", error: { message: "Cupo below the requested amount" } })
@@ -440,10 +441,11 @@ export async function runGuarantorJob(deps: JobDeps): Promise<JobReport> {
       return await markFailed(`release error: ${describe(error)}`)
     }
     if (!outcome.success) return await markFailed(outcome.message, outcome.returnCode)
-    // Money moved: record it in applications even if the request write below fails.
-    await noteApplication({ step: "desembolsado", ...amounts, code: outcome.returnCode, message: outcome.message })
 
+    // The request record first (it is what guards against a second release), then applications;
+    // money moved, so applications records it whether or not the request write succeeded.
     const recorded = await recordRelease(id, outcome)
+    await noteApplication({ step: "desembolsado", ...amounts, code: outcome.returnCode, message: outcome.message })
     if (!recorded) {
       report.unrecorded.push({ requestId: id, returnCode: outcome.returnCode })
       console.error(`[avales] RELEASED BUT NOT RECORDED: request ${id}, return code ${outcome.returnCode}. Record it by hand.`)
