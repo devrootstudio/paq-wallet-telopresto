@@ -136,6 +136,38 @@ describe("step 1: invite", () => {
     expect(report.links).toBeUndefined()
   })
 
+  it("in simulation, a test request's guarantor link is stored in dev-link and opens the form", async () => {
+    const w = await world("test")
+    const { links } = await w.run()
+    for (const p of [1, 2, 3]) {
+      const link = w.g(p).fields["dev-link"] as string
+      expect(link).toBe(links!.find((l) => l.position === p)!.url)
+      expect(await w.repo.view(link.split("/aval/")[1])).toMatchObject({ screen: "form" })
+    }
+  })
+
+  it("a re-invitation overwrites dev-link with the new link", async () => {
+    const w = await world("test")
+    await w.run()
+    const first = w.g(1).fields["dev-link"]
+    await w.airtable.update("guarantors", [{ id: w.g(1).id, fields: { status: "pending" } }])
+    const { links } = await w.run()
+    expect(w.g(1).fields["dev-link"]).toBe(links![0].url)
+    expect(w.g(1).fields["dev-link"]).not.toBe(first)
+  })
+
+  it("dev-link is never written outside simulation, nor for a real request in simulation", async () => {
+    const real = await world("real")
+    await real.run({ simulation: false })
+    expect([1, 2, 3].map((p) => real.g(p).fields.status)).toEqual(["invited", "invited", "invited"])
+    expect([1, 2, 3].map((p) => real.g(p).fields["dev-link"])).toEqual([undefined, undefined, undefined])
+
+    const realInSimulation = await world("real")
+    await realInSimulation.run({ simulation: true })
+    expect(realInSimulation.g(1).fields["dev-link"]).toBeUndefined()
+    expect(realInSimulation.g(1).fields.status).toBe("pending")
+  })
+
   it("without a working WhatsApp no link is issued: guarantors stay pending with their hash", async () => {
     const w = await world("real")
     const hashes = [1, 2, 3].map((p) => w.g(p).fields["token-hash"])
