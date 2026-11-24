@@ -118,8 +118,8 @@ async function requestMeta(): Promise<AnswerMeta> {
 
 /**
  * /aval/<token>: the guarantor accepts or rejects (contract §5, §6). The link token is the credential.
- * RENAP is simulated with the test bypass outside production; without it and without RENAP_*
- * credentials, `accept` answers `unavailable`.
+ * RENAP is always the real GTS API (RENAP_TOKEN), also with the test bypass; without the token,
+ * `accept` answers `unavailable`.
  */
 export async function answerGuarantor(
   token: string,

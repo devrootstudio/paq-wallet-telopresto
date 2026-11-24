@@ -3,9 +3,10 @@
  *
  * Simulation reuses the existing test bypass (`ENABLE_TEST_BYPASS`, "do not use in production"),
  * the same flag app/actions.ts reads, and additionally requires NODE_ENV `development` or `test`.
- * With simulation on: RENAP is simulated, valida_cupo and the disbursement return the same fake
- * values the bypass uses in Step 3 (TEST_APPROVED_AMOUNT, TEST_ID_SOLICITUD, code 0), and the job
- * response includes the guarantor links. WhatsApp is always simulated for now (see whatsapp.ts).
+ * With simulation on: valida_cupo and the disbursement return the same fake values the bypass uses
+ * in Step 3 (TEST_APPROVED_AMOUNT, TEST_ID_SOLICITUD, code 0), WhatsApp is simulated (see
+ * whatsapp.ts) and the job response includes the guarantor links. RENAP is never simulated: it is
+ * always the real API when RENAP_TOKEN is set (see renap.ts).
  */
 
 /** Environment variables as read here (process.env by default). */

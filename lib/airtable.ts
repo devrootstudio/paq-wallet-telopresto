@@ -31,6 +31,13 @@ export interface UpsertResult<F extends Fields = Fields> {
   updatedRecords: string[]
 }
 
+export interface UpdateOptions {
+  /** Overrides the client default for this call (0 = do not retry a 429). */
+  rateLimitRetries?: number
+  /** Let Airtable coerce values, e.g. create a missing select option. */
+  typecast?: boolean
+}
+
 export interface AirtableClient {
   /** All records matching the options (follows pagination up to `maxRecords`). */
   list<F extends Fields = Fields>(table: string, options?: ListOptions): Promise<AirtableRecord<F>[]>
@@ -38,7 +45,7 @@ export interface AirtableClient {
   get<F extends Fields = Fields>(table: string, id: string): Promise<AirtableRecord<F> | null>
   create<F extends Fields = Fields>(table: string, records: Fields[]): Promise<AirtableRecord<F>[]>
   /** `rateLimitRetries` overrides the client default for this call (0 = do not retry a 429). */
-  update<F extends Fields = Fields>(table: string, records: { id: string; fields: Fields }[], opts?: { rateLimitRetries?: number }): Promise<AirtableRecord<F>[]>
+  update<F extends Fields = Fields>(table: string, records: { id: string; fields: Fields }[], opts?: UpdateOptions): Promise<AirtableRecord<F>[]>
   /** Create-or-update matching on `mergeOn` (Airtable `performUpsert`). */
   upsert<F extends Fields = Fields>(table: string, records: Fields[], mergeOn: string[]): Promise<UpsertResult<F>>
 }
@@ -173,10 +180,10 @@ export function createAirtableClient(options: AirtableClientOptions): AirtableCl
       return out
     },
 
-    async update<F extends Fields>(table: string, records: { id: string; fields: Fields }[], opts?: { rateLimitRetries?: number }) {
+    async update<F extends Fields>(table: string, records: { id: string; fields: Fields }[], opts?: UpdateOptions) {
       const out: AirtableRecord<F>[] = []
       for (const batch of chunk(records, WRITE_BATCH)) {
-        const res = await request<{ records: AirtableRecord<F>[] }>("PATCH", table, tableUrl(table), { records: batch }, false, opts?.rateLimitRetries ?? retries)
+        const res = await request<{ records: AirtableRecord<F>[] }>("PATCH", table, tableUrl(table), { records: batch, ...(opts?.typecast ? { typecast: true } : {}) }, false, opts?.rateLimitRetries ?? retries)
         out.push(...(res?.records ?? []))
       }
       return out

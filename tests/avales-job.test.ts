@@ -12,7 +12,7 @@ import { validateCupo } from "@/lib/soap-client"
 import { answerGuarantorWith } from "@/lib/avales/answer"
 import { DECLARATION_TEXT } from "@/lib/avales/declaration"
 import { defaultCupo, defaultDisburse, runGuarantorJob, type DisburseOutcome, type JobDeps } from "@/lib/avales/job"
-import { simulatedRenap } from "@/lib/avales/renap"
+import { fakeRenap } from "./avales-fake-renap"
 import { createAvalesRepo, isTestRequest } from "@/lib/avales/repo"
 import { isSimulation, simulatedCupo } from "@/lib/avales/runtime"
 import { guarantorRequestSchema } from "@/lib/avales/schema"
@@ -79,7 +79,7 @@ async function world(mode: "test" | "real" = "test") {
   const run = (extra: Partial<JobDeps> = {}) => runGuarantorJob(deps(extra))
   const answer = (token: string, a: "accept" | "reject", position: number) =>
     answerGuarantorWith(
-      { airtable, renap: simulatedRenap, now: () => now, claimSettleMs: 10, clock: () => 0 },
+      { airtable, renap: fakeRenap, now: () => now, claimSettleMs: 10, clock: () => 0 },
       token,
       a,
       a === "accept"

@@ -2,7 +2,8 @@ import { describe, it, expect, vi } from "vitest"
 import { createAirtableClient } from "@/lib/airtable"
 import { answerGuarantorWith, type AnswerDeps } from "@/lib/avales/answer"
 import { DECLARATION_SHA256, DECLARATION_TEXT, DECLARATION_VERSION } from "@/lib/avales/declaration"
-import { simulatedRenap, type RenapChecker } from "@/lib/avales/renap"
+import type { RenapChecker } from "@/lib/avales/renap"
+import { fakeRenap } from "./avales-fake-renap"
 import { generateToken, hashToken } from "@/lib/avales/tokens"
 import { createFakeAirtable } from "./avales-fake-airtable"
 
@@ -45,7 +46,7 @@ function world(opts: { requestStatus?: string; expiresAt?: string; renap?: Renap
   })
   const deps: AnswerDeps = {
     airtable: createAirtableClient({ token: "t", baseId: "appTEST0000000000", fetch: fake.fetch }),
-    renap: opts.renap === undefined ? simulatedRenap : opts.renap,
+    renap: opts.renap === undefined ? fakeRenap : opts.renap,
     now: () => NOW,
     claimSettleMs: 10,
     clock: () => 0, // elapsed-time abort is tested on its own
@@ -74,8 +75,10 @@ describe("answerGuarantor: reject", () => {
 
 describe("answerGuarantor: accept", () => {
   it("RENAP match → authorized; stores the confirmed data, RENAP result, raw and the declaration hash", async () => {
-    const { deps, tokens, g } = world()
+    const { deps, tokens, g, fake } = world()
     expect(await answerGuarantorWith(deps, tokens[0], "accept", accept(), META)).toEqual({ ok: true, status: "authorized" })
+    const authorizedWrite = fake.calls.find((c) => c.method === "PATCH" && (c.body ?? "").includes('"status":"authorized"'))
+    expect(JSON.parse(authorizedWrite!.body!).typecast).toBeUndefined() // typecast only on the mismatch write
     const f = g(1).fields
     expect(f).toMatchObject({
       status: "authorized",
@@ -85,7 +88,7 @@ describe("answerGuarantor: accept", () => {
       identification: "0000000000001",
       "renap-result": "MATCH_UNICO",
     })
-    expect(JSON.parse(f["renap-raw"] as string)).toMatchObject({ simulated: true })
+    expect(JSON.parse(f["renap-raw"] as string)).toMatchObject({ data: [expect.objectContaining({ CUI: "0000000000001" })] })
     expect(JSON.parse(f.evidence as string)).toMatchObject({
       answer: "accept",
       ...META,
@@ -98,18 +101,24 @@ describe("answerGuarantor: accept", () => {
     expect(await answerGuarantorWith(deps, tokens[0], "accept", accept(), META)).toEqual({ ok: false, code: "closed" })
   })
 
-  it("RENAP no match (DPI ending in 0000) → identity_mismatch; the link stays open and a corrected DPI authorizes", async () => {
-    const { deps, tokens, g } = world()
+  it("same DPI with another name (NOMBRE_NO_COINCIDE) → identity_mismatch; the link stays open and a corrected DPI authorizes", async () => {
+    const { deps, tokens, g, fake } = world()
     expect(await answerGuarantorWith(deps, tokens[0], "accept", accept("1234567890000"), META)).toEqual({ ok: true, status: "identity_mismatch" })
-    expect(g(1).fields).toMatchObject({ status: "identity_mismatch", "renap-result": "SIN_RESULTADOS", identification: "0000000000001" })
+    expect(g(1).fields).toMatchObject({ status: "identity_mismatch", "renap-result": "NOMBRE_NO_COINCIDE", identification: "0000000000001" })
+    // The select may not have this option yet: the write lets Airtable create it (typecast).
+    const write = fake.calls.find((c) => c.method === "PATCH" && (c.body ?? "").includes("NOMBRE_NO_COINCIDE"))
+    expect(JSON.parse(write!.body!)).toMatchObject({ typecast: true })
     expect(g(1).fields["answered-at"]).toBeUndefined()
     expect(await answerGuarantorWith(deps, tokens[0], "accept", accept("1234567890001"), META)).toEqual({ ok: true, status: "authorized" })
   })
 
   it("RENAP error (DPI ending in 9999) → unavailable, status unchanged, attempt recorded", async () => {
-    const { deps, tokens, g } = world()
+    const { deps, tokens, g, fake } = world()
     expect(await answerGuarantorWith(deps, tokens[0], "accept", accept("1234567899999"), META)).toEqual({ ok: false, code: "unavailable" })
     expect(g(1).fields).toMatchObject({ status: "invited", "renap-result": "ERROR" })
+    // Only the mismatch write uses typecast; this one carries a known option.
+    const write = fake.calls.find((c) => c.method === "PATCH" && (c.body ?? "").includes('"renap-result":"ERROR"'))
+    expect(JSON.parse(write!.body!).typecast).toBeUndefined()
   })
 
   it("RENAP not configured → unavailable", async () => {
@@ -151,7 +160,7 @@ describe("answerGuarantor: one answer at a time per guarantor (answer-claim)", (
     fake.calls.filter((c) => c.method === "PATCH" && (c.body ?? "").includes('"evidence"')).length
 
   it("two simultaneous accepts from two tabs: one RENAP call, one evidence, the other gets closed", async () => {
-    const renap = vi.fn(simulatedRenap)
+    const renap = vi.fn(fakeRenap)
     const { deps, tokens, g, fake } = world({ renap })
     const results = await Promise.all([
       answerGuarantorWith(deps, tokens[0], "accept", accept(), META),
@@ -203,7 +212,7 @@ describe("answerGuarantor: one answer at a time per guarantor (answer-claim)", (
   })
 
   it("a claim confirmed later than the pause after the read steps back: unavailable, claim freed, retry works", async () => {
-    const renap = vi.fn(simulatedRenap)
+    const renap = vi.fn(fakeRenap)
     const w = world({ renap })
     const reads = [0, 100]
     const deps = { ...w.deps, clock: () => reads.shift() ?? 100, claimSettleMs: 12 }
@@ -218,7 +227,7 @@ describe("answerGuarantor: one answer at a time per guarantor (answer-claim)", (
   // (the other gets `closed`), and nothing may be left without an answer.
   describe.each([300, 900])("with %i ms per Airtable call and the real clock", (latencyMs) => {
     function slowWorld() {
-      const renap = vi.fn(simulatedRenap)
+      const renap = vi.fn(fakeRenap)
       const w = world({ renap })
       const slow = createAirtableClient({
         token: "t",
@@ -276,7 +285,7 @@ describe("answerGuarantor: no self-guarantee", () => {
   }
 
   it("rejects the applicant's DPI or phone, or another guarantor's, before RENAP, with one generic message", async () => {
-    const renap = vi.fn(simulatedRenap)
+    const renap = vi.fn(fakeRenap)
     const { deps, tokens, g } = world({ renap })
     // Same answer whichever field matched and whoever it belongs to: nothing is revealed.
     expect(await answerGuarantorWith(deps, tokens[0], "accept", { ...accept("1000000000001") }, META)).toEqual(generic)
@@ -289,11 +298,11 @@ describe("answerGuarantor: no self-guarantee", () => {
 
   it("checks again after RENAP: another guarantor confirming the same DPI meanwhile blocks the second", async () => {
     const holder: { fake?: ReturnType<typeof createFakeAirtable> } = {}
-    const renap = vi.fn(async (q: Parameters<typeof simulatedRenap>[0]) => {
+    const renap = vi.fn(async (q: Parameters<typeof fakeRenap>[0]) => {
       // While RENAP answers for guarantor 1, guarantor 2 gets authorized with the same DPI.
       const g2 = holder.fake!.rows("guarantors").find((r) => r.fields.position === 2)!
       Object.assign(g2.fields, { status: "authorized", identification: q.identification })
-      return simulatedRenap(q)
+      return fakeRenap(q)
     })
     const w = world({ renap })
     holder.fake = w.fake
@@ -305,9 +314,9 @@ describe("answerGuarantor: no self-guarantee", () => {
 describe("answerGuarantor: state changes while RENAP answers", () => {
   it("the request reaching quorum meanwhile → closed, nothing written", async () => {
     const holder: { fake?: ReturnType<typeof createFakeAirtable> } = {}
-    const renap = vi.fn(async (q: Parameters<typeof simulatedRenap>[0]) => {
+    const renap = vi.fn(async (q: Parameters<typeof fakeRenap>[0]) => {
       holder.fake!.rows("requests")[0].fields.status = "quorum"
-      return simulatedRenap(q)
+      return fakeRenap(q)
     })
     const w = world({ renap })
     holder.fake = w.fake
@@ -320,9 +329,9 @@ describe("answerGuarantor: state changes while RENAP answers", () => {
   it("the deadline passing meanwhile → expired", async () => {
     let now = NOW
     const w = world()
-    const renap = vi.fn(async (q: Parameters<typeof simulatedRenap>[0]) => {
+    const renap = vi.fn(async (q: Parameters<typeof fakeRenap>[0]) => {
       now = new Date(Date.parse(OPEN) + 1000)
-      return simulatedRenap(q)
+      return fakeRenap(q)
     })
     const deps = { ...w.deps, renap, now: () => now }
     expect(await answerGuarantorWith(deps, w.tokens[0], "accept", accept(), META)).toEqual({ ok: false, code: "expired" })

@@ -43,8 +43,8 @@ export const testAuth = (label: string) => `TEST-AVALES-e2e-${label}-${Date.now(
 /**
  * Three fictitious guarantors with distinct DPI and phones (never the applicant's, 9000000000101 /
  * 19000001). Test phones use the fixed prefixes 100/101/102: numbers starting with 1 are not assigned
- * in Guatemala, so no real person is ever "invited". DPIs end in 0101/0202/0303, so RENAP simulation
- * authorizes them unless a test overrides one with a 0000 ending (identity mismatch).
+ * in Guatemala, so no real person is ever "invited". The automatic cases never accept (accepting
+ * checks RENAP for real), so these DPIs are never sent to RENAP.
  */
 export function guarantors(): [GuarantorData, GuarantorData, GuarantorData] {
   const base = random(5)
@@ -119,13 +119,6 @@ export async function openLink(browser: Browser, url: string): Promise<Page> {
   return page
 }
 
-/** Accepts on an open form, optionally correcting the DPI first. */
-export async function accept(page: Page, opts: { identification?: string } = {}) {
-  if (opts.identification) await page.locator("#aval-identification").fill(opts.identification)
-  await page.getByRole("checkbox").check()
-  await page.getByRole("button", { name: "Avalar" }).click()
-}
-
 /** Rejects on an open form, going through the warning. */
 export async function reject(page: Page) {
   await page.getByRole("button", { name: "Rechazar" }).click()
@@ -133,9 +126,7 @@ export async function reject(page: Page) {
   await page.getByRole("button", { name: "Sí, rechazar" }).click()
 }
 
-export const THANKS = "¡Gracias por tu apoyo!"
 export const REJECTED = "Registramos que no avalas la solicitud"
 export const CLOSED = "Esta solicitud ya se resolvió"
 export const EXPIRED = "Esta solicitud venció"
-export const CHECK_DATA = "No pudimos confirmar tus datos"
 export const BUSY = "Estamos registrando otra respuesta"
